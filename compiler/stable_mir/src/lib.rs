@@ -28,6 +28,7 @@ pub use crate::error::*;
 use crate::mir::Body;
 use crate::mir::Mutability;
 use crate::ty::{ForeignModuleDef, ImplDef, IndexedVal, Span, TraitDef, Ty};
+use serde::Serialize;
 
 pub mod abi;
 #[macro_use]
@@ -75,7 +76,7 @@ pub type TraitDecls = Vec<TraitDef>;
 pub type ImplTraitDecls = Vec<ImplDef>;
 
 /// Holds information about a crate.
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
 pub struct Crate {
     pub id: CrateNum,
     pub name: Symbol,
@@ -99,7 +100,7 @@ impl Crate {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, Serialize)]
 pub enum ItemKind {
     Fn,
     Static,
@@ -107,7 +108,7 @@ pub enum ItemKind {
     Ctor(CtorKind),
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, Serialize)]
 pub enum CtorKind {
     Const,
     Fn,
@@ -186,7 +187,7 @@ pub fn all_trait_impls() -> ImplTraitDecls {
 }
 
 /// A type that provides internal information but that can still be used for debug purpose.
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct Opaque(String);
 
 impl std::fmt::Display for Opaque {

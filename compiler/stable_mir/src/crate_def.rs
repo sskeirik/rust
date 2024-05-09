@@ -3,9 +3,10 @@
 
 use crate::ty::Span;
 use crate::{with, Crate, Symbol};
+use serde::Serialize;
 
 /// A unique identification number for each item accessible for the current compilation unit.
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 pub struct DefId(pub(crate) usize);
 
 /// A trait for retrieving information about a particular definition.
@@ -57,7 +58,7 @@ macro_rules! crate_def {
       $vis:vis $name:ident $(;)?
     ) => {
         $(#[$attr])*
-        #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize)]
         $vis struct $name(pub DefId);
 
         impl CrateDef for $name {
