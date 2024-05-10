@@ -29,6 +29,7 @@ use crate::mir::Body;
 use crate::mir::Mutability;
 use crate::ty::{ForeignModuleDef, ImplDef, IndexedVal, Span, TraitDef, Ty};
 use serde::Serialize;
+pub use serde_json;
 
 pub mod abi;
 #[macro_use]
