@@ -8,7 +8,7 @@ use crate::Opaque;
 use std::fmt::{self, Debug};
 use std::num::NonZero;
 use std::ops::RangeInclusive;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 /// A function ABI definition.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -109,8 +109,17 @@ impl LayoutShape {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Layout(usize);
+
+impl Serialize for Layout {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_newtype_struct("Layout", &self.shape())
+    }
+}
 
 impl Layout {
     pub fn shape(self) -> LayoutShape {

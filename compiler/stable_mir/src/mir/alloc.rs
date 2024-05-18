@@ -4,7 +4,7 @@ use crate::target::{Endian, MachineInfo};
 use crate::ty::{Allocation, Binder, ExistentialTraitRef, IndexedVal, Ty};
 use crate::{with, Error};
 use std::io::Read;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 /// An allocation in the SMIR global memory can be either a function pointer,
 /// a static, or a "real" allocation with some data in it.
@@ -12,6 +12,7 @@ use serde::Serialize;
 pub enum GlobalAlloc {
     /// The alloc ID is used as a function pointer.
     Function(Instance),
+    // TODO: might need to further processing on this
     /// This alloc ID points to a symbolic (not-reified) vtable.
     /// The `None` trait ref is used to represent auto traits.
     VTable(Ty, Option<Binder<ExistentialTraitRef>>),
@@ -41,8 +42,17 @@ impl GlobalAlloc {
 }
 
 /// A unique identification number for each provenance
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct AllocId(usize);
+
+impl Serialize for AllocId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_newtype_struct("AllocId", &GlobalAlloc::from(*self))
+    }
+}
 
 impl IndexedVal for AllocId {
     fn to_val(index: usize) -> Self {

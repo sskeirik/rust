@@ -58,7 +58,7 @@ macro_rules! crate_def {
       $vis:vis $name:ident $(;)?
     ) => {
         $(#[$attr])*
-        #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize)]
+        #[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
         $vis struct $name(pub DefId);
 
         impl CrateDef for $name {

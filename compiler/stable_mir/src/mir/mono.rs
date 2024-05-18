@@ -5,7 +5,7 @@ use crate::ty::{Allocation, ClosureDef, ClosureKind, FnDef, GenericArgs, Indexed
 use crate::{with, CrateItem, DefId, Error, ItemKind, Opaque, Symbol};
 use std::fmt::{Debug, Formatter};
 use std::io;
-use serde::Serialize;
+use serde::{Serialize, Serializer, ser::SerializeStruct};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub enum MonoItem {
@@ -14,13 +14,25 @@ pub enum MonoItem {
     GlobalAsm(Opaque),
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
 pub struct Instance {
     /// The type of instance.
     pub kind: InstanceKind,
     /// An ID used to get the instance definition from the compiler.
     /// Do not use this field directly.
     pub def: InstanceDef,
+}
+
+impl Serialize for Instance {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        // TODO: check if we need to call instance APIs to retrieve missing info
+        let mut ser = serializer.serialize_struct("Instance",1)?;
+        ser.serialize_field("kind", &self.kind)?;
+        ser.end()
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize)]
@@ -250,6 +262,7 @@ impl CrateDef for InstanceDef {
 
 crate_def! {
     /// Holds information about a static variable definition.
+    #[derive(Serialize)]
     pub StaticDef;
 }
 

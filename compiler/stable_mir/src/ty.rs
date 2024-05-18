@@ -9,10 +9,19 @@ use crate::{crate_def::CrateDef, mir::mono::StaticDef};
 use crate::{Filename, Opaque};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Range;
-use serde::Serialize;
+use serde::{Serialize, Serializer, ser::{SerializeStruct, SerializeTupleVariant, Error as SerError}};
 
-#[derive(Copy, Clone, Eq, PartialEq, Hash, Serialize)]
+#[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Ty(usize);
+
+impl Serialize for Ty {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_newtype_struct("Ty",&self.kind())
+    }
+}
 
 impl Debug for Ty {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -249,9 +258,29 @@ pub struct LineInfo {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum TyKind {
     RigidTy(RigidTy),
+    #[serde(serialize_with = "serialize_alias")]
     Alias(AliasKind, AliasTy),
     Param(ParamTy),
     Bound(usize, BoundTy),
+}
+
+fn serialize_alias<S>(akind: &AliasKind, aty: &AliasTy, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer
+{
+    let mut tv = ser.serialize_tuple_variant("TyKind", 1, "Alias", 3)?;
+    tv.serialize_field(&akind)?;
+    tv.serialize_field(&aty.args)?;
+    tv.serialize_field(&with(|cx| cx.def_ty_with_args(aty.def_id.def_id(), &aty.args)))?;
+    tv.end()
+    // TODO: check if we need more information than above
+    // Example Code for Inspiration:
+    // let assoc_item = with(|cx| cx.associated_item(did));
+    // let assoc_item_did = assoc_item.did;
+    // match assoc_item.kind {
+    //     AssocKind::Ty    => with(|cx| cx.type_of(assoc_item_did)),
+    //     AssocKind::Fn    => with(|cx| cx.fn_sig(assoc_item_did)),
+    //     AssocKind::Const => with(|cx| cx.type_of(assoc_item_did)) // What to do here ???
 }
 
 impl TyKind {
@@ -483,6 +512,7 @@ pub enum RigidTy {
     Int(IntTy),
     Uint(UintTy),
     Float(FloatTy),
+    #[serde(serialize_with = "serialize_adtdef")]
     Adt(AdtDef, GenericArgs),
     Foreign(ForeignDef),
     Str,
@@ -491,15 +521,48 @@ pub enum RigidTy {
     Slice(Ty),
     RawPtr(Ty, Mutability),
     Ref(Region, Ty, Mutability),
+    #[serde(serialize_with = "serialize_fndef")]
     FnDef(FnDef, GenericArgs),
     FnPtr(PolyFnSig),
+    #[serde(serialize_with = "serialize_closuredef")]
     Closure(ClosureDef, GenericArgs),
     // FIXME(stable_mir): Movability here is redundant
     Coroutine(CoroutineDef, GenericArgs, Movability),
-    Dynamic(Vec<Binder<ExistentialPredicate>>, Region, DynKind),
+    Dynamic(Vec<Binder<ExistentialPredicate>>, Region, DynKind), // TODO: what is the best way to process?
     Never,
     Tuple(Vec<Ty>),
-    CoroutineWitness(CoroutineWitnessDef, GenericArgs),
+    CoroutineWitness(CoroutineWitnessDef, GenericArgs), // TODO: what is the best way to process?
+}
+
+fn serialize_adtdef<S>(def: &AdtDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer
+{
+    let mut tv = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 1)?;
+    tv.serialize_field(&def.ty_with_args(args))?;
+    tv.end()
+}
+
+fn serialize_fndef<S>(def: &FnDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer
+{
+    let mut tv = ser.serialize_tuple_variant("RigidTy", 13, "FnDef", 1)?;
+    let sig = TyKind::RigidTy(RigidTy::FnDef(*def, args.clone())).fn_sig().ok_or(S::Error::custom("RigidTy::FnDef serialization failed"))?;
+    tv.serialize_field(&sig)?;
+    tv.end()
+}
+
+pub(crate) fn serialize_closuredef<S>(def: &ClosureDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer
+{
+    let mut tv = ser.serialize_tuple_variant("RigidTy", 14, "ClosureDef", 1)?;
+    let sig = TyKind::RigidTy(RigidTy::Closure(*def, args.clone())).fn_sig().ok_or(S::Error::custom("RigidTy::Closure serialization failed"))?;
+    tv.serialize_field(&sig)?;
+    // TODO: the following might work better, if we knew how to instantiate it
+    // tv.serialize_field(&with(|cx| cx.resolve_closure(*def, args, /* which closure kind??? */)))?;
+    tv.end()
 }
 
 impl RigidTy {
@@ -577,6 +640,15 @@ crate_def! {
     pub ForeignModuleDef;
 }
 
+impl Serialize for ForeignModuleDef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+       serializer.serialize_newtype_struct("ForeignModuleDef", &self.module())
+    }
+}
+
 impl ForeignModuleDef {
     pub fn module(&self) -> ForeignModule {
         with(|cx| cx.foreign_module(*self))
@@ -594,9 +666,30 @@ impl ForeignModule {
     }
 }
 
+impl Serialize for ForeignModule {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+       let mut s = serializer.serialize_struct("ForeignModule", 2)?;
+       s.serialize_field("def_id", &self.def_id.0)?;
+       s.serialize_field("abi", &self.abi)?;
+       s.end()
+    }
+}
+
 crate_def! {
     /// Hold information about a ForeignItem in a crate.
     pub ForeignDef;
+}
+
+impl Serialize for ForeignDef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_newtype_struct("ForeignDef", &self.kind())
+    }
 }
 
 impl ForeignDef {
@@ -617,6 +710,17 @@ crate_def! {
     pub FnDef;
 }
 
+impl Serialize for FnDef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_newtype_struct("FnDef", &with(|cx| cx.def_ty(self.def_id())))
+        // TODO: the following would be more interesting, but not sure where to recover the generic args
+        // serializer.serialize_newtype_struct("FnDef", with(|cx| cx.fn_sig(*self, /* missing GenericArgs type */)))
+    }
+}
+
 impl FnDef {
     // Get the function body if available.
     pub fn body(&self) -> Option<Body> {
@@ -629,18 +733,22 @@ crate_def! {
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub CoroutineDef;
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub ParamDef;
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub BrNamedDef;
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub AdtDef;
 }
 
@@ -778,12 +886,23 @@ impl AdtKind {
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub AliasDef;
 }
 
 crate_def! {
     /// A trait's definition.
     pub TraitDef;
+}
+
+// TODO: check if more specialized expansions are needed
+impl Serialize for TraitDef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_newtype_struct("TraitDef", &TraitDef::declaration(self))
+    }
 }
 
 impl TraitDef {
@@ -793,16 +912,27 @@ impl TraitDef {
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub GenericDef;
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub ConstDef;
 }
 
 crate_def! {
     /// A trait impl definition.
     pub ImplDef;
+}
+
+impl Serialize for ImplDef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_newtype_struct("ImplDef", &self.trait_impl())
+    }
 }
 
 impl ImplDef {
@@ -813,10 +943,12 @@ impl ImplDef {
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub RegionDef;
 }
 
 crate_def! {
+    #[derive(Serialize)]
     pub CoroutineWitnessDef;
 }
 

@@ -28,7 +28,7 @@ pub use crate::error::*;
 use crate::mir::Body;
 use crate::mir::Mutability;
 use crate::ty::{ForeignModuleDef, ImplDef, IndexedVal, Span, TraitDef, Ty};
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 pub use serde_json;
 
 pub mod abi;
@@ -119,6 +119,7 @@ pub type Filename = String;
 
 crate_def! {
     /// Holds information about an item in a crate.
+    #[derive(Serialize)]
     pub CrateItem;
 }
 
@@ -188,8 +189,17 @@ pub fn all_trait_impls() -> ImplTraitDecls {
 }
 
 /// A type that provides internal information but that can still be used for debug purpose.
-#[derive(Clone, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Opaque(String);
+
+impl Serialize for Opaque {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.0)
+    }
+}
 
 impl std::fmt::Display for Opaque {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

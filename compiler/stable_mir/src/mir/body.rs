@@ -616,6 +616,7 @@ pub enum AggregateKind {
     Array(Ty),
     Tuple,
     Adt(AdtDef, VariantIdx, GenericArgs, Option<UserTypeAnnotationIndex>, Option<FieldIdx>),
+    #[serde(serialize_with = "crate::ty::serialize_closuredef")]
     Closure(ClosureDef, GenericArgs),
     // FIXME(stable_mir): Movability here is redundant
     Coroutine(CoroutineDef, GenericArgs, Movability),
