@@ -50,6 +50,7 @@ impl Serialize for AllocId {
     where
         S: Serializer,
     {
+        println!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("AllocId", &GlobalAlloc::from(*self))
     }
 }

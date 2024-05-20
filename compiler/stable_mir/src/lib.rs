@@ -197,6 +197,7 @@ impl Serialize for Opaque {
     where
         S: Serializer,
     {
+        println!("Serialize: {:?}", self);
         serializer.serialize_str(&self.0)
     }
 }

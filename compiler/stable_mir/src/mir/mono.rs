@@ -28,6 +28,7 @@ impl Serialize for Instance {
     where
         S: Serializer,
     {
+        println!("Serialize: {:?}", self);
         // TODO: check if we need to call instance APIs to retrieve missing info
         let mut ser = serializer.serialize_struct("Instance",1)?;
         ser.serialize_field("kind", &self.kind)?;

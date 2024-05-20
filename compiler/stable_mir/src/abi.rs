@@ -117,6 +117,7 @@ impl Serialize for Layout {
     where
         S: Serializer,
     {
+        println!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("Layout", &self.shape())
     }
 }
