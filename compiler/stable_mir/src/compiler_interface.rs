@@ -123,7 +123,7 @@ pub trait Context {
     fn def_ty(&self, item: DefId) -> Ty;
 
     /// Returns the type of given definition instantiated with the given arguments.
-    fn def_ty_with_args(&self, item: DefId, args: &GenericArgs) -> Ty;
+    fn def_ty_with_args(&self, item: DefId, args: &GenericArgs) -> Option<Ty>;
 
     /// Returns literal value of a const as a string.
     fn const_pretty(&self, cnst: &Const) -> String;
