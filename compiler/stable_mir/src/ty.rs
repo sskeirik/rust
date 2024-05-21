@@ -1395,6 +1395,7 @@ pub enum TraitSpecializationKind {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct TraitDecl {
+    #[serde(skip)] // skip serializing this field to avoid recursive cycles
     pub def_id: TraitDef,
     pub safety: Safety,
     pub paren_sugar: bool,
