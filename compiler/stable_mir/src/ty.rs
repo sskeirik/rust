@@ -986,8 +986,17 @@ crate_def! {
 }
 
 /// A list of generic arguments.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GenericArgs(pub Vec<GenericArgKind>);
+
+impl Serialize for GenericArgs {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_newtype_struct("GenericArgs", &self.0)
+    }
+}
 
 impl std::ops::Index<ParamTy> for GenericArgs {
     type Output = Ty;
