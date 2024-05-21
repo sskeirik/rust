@@ -10,7 +10,7 @@ use crate::{Filename, Opaque};
 use crate::cycle_check;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Range;
-use serde::{Serialize, Serializer, ser::{SerializeStruct, SerializeTupleVariant, Error as SerError}};
+use serde::{Serialize, Serializer, ser::{SerializeStruct, SerializeTupleStruct, SerializeTupleVariant, Error as SerError}};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Ty(usize);
@@ -267,13 +267,41 @@ pub struct LineInfo {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum TyKind {
     RigidTy(RigidTy),
-    Alias(AliasKind, AliasTy), // TODO: currently, we serialize AliasTy on its own
-                               // does AliasKind help serialization here?
+    #[serde(serialize_with = "serialize_alias")]
+    Alias(AliasKind, AliasTy),
     // from rustc_middle::ty::TyKind::Param(rustc_middle::ty::ParamTy)
     Param(ParamTy),
     // from rustc_middle::ty::TyKind::Bound(DebruijnIndex, rustc_middle::ty::BoundTy)
     // usize param is DebruijnIndex, second param is wrapped u32 that represents bound variable identifier
     Bound(usize, BoundTy),
+}
+
+fn serialize_alias<S>(akind: &AliasKind, aty: &AliasTy, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    struct AliasTyExtra<'a>(&'a AliasTy);
+    impl Serialize for AliasTyExtra<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut ser = serializer.serialize_struct("AliasTy", 2)?;
+            ser.serialize_field("def_id",&with(|cx| cx.def_ty_with_args(self.0.def_id.def_id(), &self.0.args)))?;
+            ser.serialize_field("args", &self.0.args)?;
+            ser.end()
+        }
+    }
+
+    println!("Serialize: {:?} {:?}", akind, aty);
+    let mut tv = serializer.serialize_tuple_struct("Alias",2)?;
+    tv.serialize_field(akind)?;
+    if *akind == AliasKind::Opaque {
+        tv.serialize_field(&AliasTyExtra(aty))?;
+    } else {
+        tv.serialize_field(aty)?;
+    }
+    tv.end()
 }
 
 impl TyKind {
@@ -1027,7 +1055,7 @@ pub enum AliasKind {
     Weak,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct AliasTy {
     pub def_id: AliasDef,
     pub args: GenericArgs,
