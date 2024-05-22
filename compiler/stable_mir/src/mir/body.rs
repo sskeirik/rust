@@ -5,8 +5,8 @@ use crate::ty::{
     VariantIdx,
 };
 use crate::{Error, Opaque, Span, Symbol};
-use std::io;
 use serde::Serialize;
+use std::io;
 
 /// The SMIR representation of a single function.
 #[derive(Clone, Debug, Serialize)]
@@ -598,7 +598,9 @@ impl Rvalue {
                 AggregateKind::Tuple => Ok(Ty::new_tuple(
                     &ops.iter().map(|op| op.ty(locals)).collect::<Result<Vec<_>, _>>()?,
                 )),
-                AggregateKind::Adt(def, _, ref args, _, _) => Ok(def.ty_with_args(args).expect("Normalization failed")),
+                AggregateKind::Adt(def, _, ref args, _, _) => {
+                    Ok(def.ty_with_args(args).expect("Normalization failed"))
+                }
                 AggregateKind::Closure(def, ref args) => Ok(Ty::new_closure(def, args.clone())),
                 AggregateKind::Coroutine(def, ref args, mov) => {
                     Ok(Ty::new_coroutine(def, args.clone(), mov))

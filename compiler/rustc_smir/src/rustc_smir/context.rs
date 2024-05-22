@@ -415,7 +415,11 @@ impl<'tcx> Context for TablesWrapper<'tcx> {
         tcx.type_of(item.internal(&mut *tables, tcx)).instantiate_identity().stable(&mut *tables)
     }
 
-    fn def_ty_with_args(&self, item: stable_mir::DefId, args: &GenericArgs) -> Option<stable_mir::ty::Ty> {
+    fn def_ty_with_args(
+        &self,
+        item: stable_mir::DefId,
+        args: &GenericArgs,
+    ) -> Option<stable_mir::ty::Ty> {
         let mut tables = self.0.borrow_mut();
         let tcx = tables.tcx;
         let args = args.internal(&mut *tables, tcx);

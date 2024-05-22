@@ -225,7 +225,6 @@ struct SerializeCycleCheck {
     types: rustc_data_structures::fx::FxHashSet<Ty>,
 }
 
-
 // A thread local variable that stores a pointer to the seen sets for recursive, interned values
 // so that we can avoid infinite looping when printing them out
 scoped_thread_local! (static TLV: Cell<*const ()>);
@@ -242,7 +241,8 @@ pub(crate) fn cycle_check<R>(f: impl for<'tcx> FnOnce(&mut SerializeCycleCheck) 
 }
 
 pub fn to_json<S>(value: S) -> Result<String, serde_json::Error>
-where S : Serialize
+where
+    S: Serialize,
 {
     assert!(!TLV.is_set());
     let scc: RefCell<SerializeCycleCheck> = RefCell::new(std::default::Default::default());

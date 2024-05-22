@@ -5,10 +5,10 @@ use crate::target::{MachineInfo, MachineSize as Size};
 use crate::ty::{Align, IndexedVal, Ty, VariantIdx};
 use crate::Error;
 use crate::Opaque;
+use serde::{Serialize, Serializer};
 use std::fmt::{self, Debug};
 use std::num::NonZero;
 use std::ops::RangeInclusive;
-use serde::{Serialize, Serializer};
 
 /// A function ABI definition.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]

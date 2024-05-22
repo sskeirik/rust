@@ -3,9 +3,9 @@ use crate::crate_def::CrateDef;
 use crate::mir::Body;
 use crate::ty::{Allocation, ClosureDef, ClosureKind, FnDef, GenericArgs, IndexedVal, Ty};
 use crate::{with, CrateItem, DefId, Error, ItemKind, Opaque, Symbol};
+use serde::{ser::SerializeStruct, Serialize, Serializer};
 use std::fmt::{Debug, Formatter};
 use std::io;
-use serde::{Serialize, Serializer, ser::SerializeStruct};
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
 pub enum MonoItem {
@@ -30,9 +30,9 @@ impl Serialize for Instance {
     {
         println!("Serialize: {:?}", self);
         // TODO: check if we need to call instance APIs to retrieve missing info
-        let mut ser = serializer.serialize_struct("Instance",1)?;
-        ser.serialize_field("kind", &self.kind)?;
-        ser.end()
+        let mut cs = serializer.serialize_struct("Instance", 1)?;
+        cs.serialize_field("kind", &self.kind)?;
+        cs.end()
     }
 }
 

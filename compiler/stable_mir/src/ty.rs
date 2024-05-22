@@ -3,14 +3,17 @@ use super::{
     with, DefId, Error, Symbol,
 };
 use crate::abi::Layout;
+use crate::cycle_check;
 use crate::mir::alloc::{read_target_int, read_target_uint, AllocId};
 use crate::target::MachineInfo;
 use crate::{crate_def::CrateDef, mir::mono::StaticDef};
 use crate::{Filename, Opaque};
-use crate::cycle_check;
+use serde::{
+    ser::{Error as SerError, SerializeStruct, SerializeTupleStruct, SerializeTupleVariant},
+    Serialize, Serializer,
+};
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Range;
-use serde::{Serialize, Serializer, ser::{SerializeStruct, SerializeTupleStruct, SerializeTupleVariant, Error as SerError}};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Ty(usize);
@@ -21,14 +24,14 @@ impl Serialize for Ty {
         S: Serializer,
     {
         println!("Serialize: {:?}", self);
-        let mut cs = serializer.serialize_struct("Ty",2)?;
+        let mut cs = serializer.serialize_struct("Ty", 2)?;
         cs.serialize_field("id", &self.0)?;
         if cycle_check(|scc| scc.types.contains(self)) {
             cs.serialize_field("kind", &Option::<TyKind>::None)?;
         } else {
-             cycle_check(|scc| scc.types.insert(*self));
-             cs.serialize_field("kind", &Some(self.kind()))?;
-             cycle_check(|scc| scc.types.remove(self));
+            cycle_check(|scc| scc.types.insert(*self));
+            cs.serialize_field("kind", &Some(self.kind()))?;
+            cycle_check(|scc| scc.types.remove(self));
         }
         cs.end()
     }
@@ -288,22 +291,25 @@ where
         where
             S: Serializer,
         {
-            let mut ser = serializer.serialize_struct("AliasTy", 2)?;
-            ser.serialize_field("def_id",&with(|cx| cx.def_ty_with_args(self.0.def_id.def_id(), &self.0.args)))?;
-            ser.serialize_field("args", &self.0.args)?;
-            ser.end()
+            let mut cs = serializer.serialize_struct("AliasTy", 2)?;
+            cs.serialize_field(
+                "def_id",
+                &with(|cx| cx.def_ty_with_args(self.0.def_id.def_id(), &self.0.args)),
+            )?;
+            cs.serialize_field("args", &self.0.args)?;
+            cs.end()
         }
     }
 
     println!("Serialize: {:?} {:?}", akind, aty);
-    let mut tv = serializer.serialize_tuple_struct("Alias",2)?;
-    tv.serialize_field(akind)?;
+    let mut cs = serializer.serialize_tuple_struct("Alias", 2)?;
+    cs.serialize_field(akind)?;
     if *akind == AliasKind::Opaque {
-        tv.serialize_field(&AliasTyExtra(aty))?;
+        cs.serialize_field(&AliasTyExtra(aty))?;
     } else {
-        tv.serialize_field(aty)?;
+        cs.serialize_field(aty)?;
     }
-    tv.end()
+    cs.end()
 }
 
 impl TyKind {
@@ -541,7 +547,7 @@ pub enum RigidTy {
     Str,
     Array(Ty, Const),
     Pat(Ty, Pattern), // NOTE: uses unstable pattern_types feature declared via pattern_types! macro
-                      // Semantically, restricts type membership to elements which match the pattern
+    // Semantically, restricts type membership to elements which match the pattern
     Slice(Ty),
     RawPtr(Ty, Mutability),
     Ref(Region, Ty, Mutability),
@@ -560,37 +566,51 @@ pub enum RigidTy {
 
 fn serialize_adtdef<S>(def: &AdtDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
 where
-    S: Serializer
+    S: Serializer,
 {
     println!("Serialize: {:?} {:?}", def, args);
-    let mut tv = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 1)?;
-    let ty = if let Some(ty) = def.ty_with_args(args) { ty } else { let ty = def.ty(); println!("Failed to call AdtDef::ty_with_args(). Fallback type: {:?}", ty); ty };
-    tv.serialize_field(&ty)?;
-    tv.end()
+    let mut cs = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 1)?;
+    let ty = if let Some(ty) = def.ty_with_args(args) {
+        ty
+    } else {
+        let ty = def.ty();
+        println!("Failed to call AdtDef::ty_with_args(). Fallback type: {:?}", ty);
+        ty
+    };
+    cs.serialize_field(&ty)?;
+    cs.end()
 }
 
 fn serialize_fndef<S>(def: &FnDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
 where
-    S: Serializer
+    S: Serializer,
 {
     println!("Serialize: {:?} {:?}", def, args);
-    let mut tv = ser.serialize_tuple_variant("RigidTy", 13, "FnDef", 1)?;
-    let sig = TyKind::RigidTy(RigidTy::FnDef(*def, args.clone())).fn_sig().ok_or(S::Error::custom("RigidTy::FnDef serialization failed"))?;
-    tv.serialize_field(&sig)?;
-    tv.end()
+    let mut cs = ser.serialize_tuple_variant("RigidTy", 13, "FnDef", 1)?;
+    let sig = TyKind::RigidTy(RigidTy::FnDef(*def, args.clone()))
+        .fn_sig()
+        .ok_or(S::Error::custom("RigidTy::FnDef serialization failed"))?;
+    cs.serialize_field(&sig)?;
+    cs.end()
 }
 
-pub(crate) fn serialize_closuredef<S>(def: &ClosureDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
+pub(crate) fn serialize_closuredef<S>(
+    def: &ClosureDef,
+    args: &GenericArgs,
+    ser: S,
+) -> Result<S::Ok, S::Error>
 where
-    S: Serializer
+    S: Serializer,
 {
     println!("Serialize: {:?} {:?}", def, args);
-    let mut tv = ser.serialize_tuple_variant("RigidTy", 14, "ClosureDef", 1)?;
-    let sig = TyKind::RigidTy(RigidTy::Closure(*def, args.clone())).fn_sig().ok_or(S::Error::custom("RigidTy::Closure serialization failed"))?;
-    tv.serialize_field(&sig)?;
+    let mut cs = ser.serialize_tuple_variant("RigidTy", 14, "ClosureDef", 1)?;
+    let sig = TyKind::RigidTy(RigidTy::Closure(*def, args.clone()))
+        .fn_sig()
+        .ok_or(S::Error::custom("RigidTy::Closure serialization failed"))?;
+    cs.serialize_field(&sig)?;
     // TODO: the following might work better, if we knew how to instantiate it
-    // tv.serialize_field(&with(|cx| cx.resolve_closure(*def, args, /* which closure kind??? */)))?;
-    tv.end()
+    // cs.serialize_field(&with(|cx| cx.resolve_closure(*def, args, /* which closure kind??? */)))?;
+    cs.end()
 }
 
 impl RigidTy {
@@ -673,8 +693,8 @@ impl Serialize for ForeignModuleDef {
     where
         S: Serializer,
     {
-       println!("Serialize: {:?}", self);
-       serializer.serialize_newtype_struct("ForeignModuleDef", &self.module())
+        println!("Serialize: {:?}", self);
+        serializer.serialize_newtype_struct("ForeignModuleDef", &self.module())
     }
 }
 
@@ -701,11 +721,11 @@ impl Serialize for ForeignModule {
     where
         S: Serializer,
     {
-       println!("Serialize: {:?}", self);
-       let mut s = serializer.serialize_struct("ForeignModule", 2)?;
-       s.serialize_field("def_id", &self.def_id.0)?;
-       s.serialize_field("abi", &self.abi)?;
-       s.end()
+        println!("Serialize: {:?}", self);
+        let mut s = serializer.serialize_struct("ForeignModule", 2)?;
+        s.serialize_field("def_id", &self.def_id.0)?;
+        s.serialize_field("abi", &self.abi)?;
+        s.end()
     }
 }
 
@@ -719,7 +739,7 @@ impl Serialize for ForeignDef {
     where
         S: Serializer,
     {
-       println!("Serialize: {:?}", self);
+        println!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("ForeignDef", &self.kind())
     }
 }
@@ -747,7 +767,7 @@ impl Serialize for FnDef {
     where
         S: Serializer,
     {
-       println!("Serialize: {:?}", self);
+        println!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("FnDef", &with(|cx| cx.def_ty(self.def_id())))
         // TODO: the following would be more interesting, but not sure where to recover the generic args
         // serializer.serialize_newtype_struct("FnDef", with(|cx| cx.fn_sig(*self, /* missing GenericArgs type */)))
@@ -934,7 +954,7 @@ impl Serialize for TraitDef {
     where
         S: Serializer,
     {
-       println!("Serialize: {:?}", self);
+        println!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("TraitDef", &TraitDef::declaration(self))
     }
 }
@@ -965,7 +985,7 @@ impl Serialize for ImplDef {
     where
         S: Serializer,
     {
-       println!("Serialize: {:?}", self);
+        println!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("ImplDef", &self.trait_impl())
     }
 }
@@ -1374,14 +1394,14 @@ impl Allocation {
 //
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum ConstantKind {
-    Allocated(Allocation),         // collasped ConstAllocation/Allocation
-                                   // from mir::Const::Val
-                                   // from ty::Const::Value which does _not_ convert to mir::Const::Val(ZeroSized)
+    Allocated(Allocation), // collasped ConstAllocation/Allocation
+    // from mir::Const::Val
+    // from ty::Const::Value which does _not_ convert to mir::Const::Val(ZeroSized)
     Unevaluated(UnevaluatedConst), // lifted from mir::Const::Unevaluated or ty::Const::Unevaluated
     Param(ParamConst),             // lifted from ty::Const::Param
     /// Store ZST constants.
     /// We have to special handle these constants since its type might be generic.
-    ZeroSized,                     // lifted from mir::Const::Val(ZeroSized)
+    ZeroSized, // lifted from mir::Const::Val(ZeroSized)
                                    // and from ty::Const::Value that converts to mir::Const::Val(ZeroSized)
 }
 
