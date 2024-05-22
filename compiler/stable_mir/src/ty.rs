@@ -258,29 +258,13 @@ pub struct LineInfo {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub enum TyKind {
     RigidTy(RigidTy),
-    #[serde(serialize_with = "serialize_alias")]
-    Alias(AliasKind, AliasTy),
+    Alias(AliasKind, AliasTy), // TODO: currently, we serialize AliasTy on its own
+                               // does AliasKind help serialization here?
+    // from rustc_middle::ty::TyKind::Param(rustc_middle::ty::ParamTy)
     Param(ParamTy),
+    // from rustc_middle::ty::TyKind::Bound(DebruijnIndex, rustc_middle::ty::BoundTy)
+    // usize param is DebruijnIndex, second param is wrapped u32 that represents bound variable identifier
     Bound(usize, BoundTy),
-}
-
-fn serialize_alias<S>(akind: &AliasKind, aty: &AliasTy, ser: S) -> Result<S::Ok, S::Error>
-where
-    S: Serializer
-{
-    let mut tv = ser.serialize_tuple_variant("TyKind", 1, "Alias", 3)?;
-    tv.serialize_field(&akind)?;
-    tv.serialize_field(&aty.args)?;
-    tv.serialize_field(&with(|cx| cx.def_ty_with_args(aty.def_id.def_id(), &aty.args)))?;
-    tv.end()
-    // TODO: check if we need more information than above
-    // Example Code for Inspiration:
-    // let assoc_item = with(|cx| cx.associated_item(did));
-    // let assoc_item_did = assoc_item.did;
-    // match assoc_item.kind {
-    //     AssocKind::Ty    => with(|cx| cx.type_of(assoc_item_did)),
-    //     AssocKind::Fn    => with(|cx| cx.fn_sig(assoc_item_did)),
-    //     AssocKind::Const => with(|cx| cx.type_of(assoc_item_did)) // What to do here ???
 }
 
 impl TyKind {
@@ -517,7 +501,8 @@ pub enum RigidTy {
     Foreign(ForeignDef),
     Str,
     Array(Ty, Const),
-    Pat(Ty, Pattern),
+    Pat(Ty, Pattern), // NOTE: uses unstable pattern_types feature declared via pattern_types! macro
+                      // Semantically, restricts type membership to elements which match the pattern
     Slice(Ty),
     RawPtr(Ty, Mutability),
     Ref(Region, Ty, Mutability),
@@ -1023,7 +1008,7 @@ pub enum AliasKind {
     Weak,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AliasTy {
     pub def_id: AliasDef,
     pub args: GenericArgs,
@@ -1033,6 +1018,18 @@ pub struct AliasTy {
 pub struct AliasTerm {
     pub def_id: AliasDef,
     pub args: GenericArgs,
+}
+
+impl Serialize for AliasTy {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut tv = serializer.serialize_struct("Alias",2)?;
+        tv.serialize_field("def_id",&with(|cx| cx.def_ty_with_args(self.def_id.def_id(), &self.args)))?;
+        tv.serialize_field("args", &self.args)?;
+        tv.end()
+    }
 }
 
 pub type PolyFnSig = Binder<FnSig>;
