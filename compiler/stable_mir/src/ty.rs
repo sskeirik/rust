@@ -21,14 +21,16 @@ impl Serialize for Ty {
         S: Serializer,
     {
         println!("Serialize: {:?}", self);
+        let mut cs = serializer.serialize_struct("Ty",2)?;
+        cs.serialize_field("id", &self.0)?;
         if cycle_check(|scc| scc.types.contains(self)) {
-            serializer.serialize_newtype_struct("Ty",&self.0)
+            cs.serialize_field("kind", &Option::<TyKind>::None)?;
         } else {
              cycle_check(|scc| scc.types.insert(*self));
-             let ser = serializer.serialize_newtype_struct("Ty",&self.kind());
+             cs.serialize_field("kind", &Some(self.kind()))?;
              cycle_check(|scc| scc.types.remove(self));
-             ser
         }
+        cs.end()
     }
 }
 
