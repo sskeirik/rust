@@ -562,7 +562,7 @@ where
 {
     println!("Serialize: {:?} {:?}", def, args);
     let mut tv = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 1)?;
-    let ty = if let Some(ty) = def.ty_with_args(args) { println!("Failed to call AdtDef::ty_with_args()"); ty } else { def.ty() };
+    let ty = if let Some(ty) = def.ty_with_args(args) { ty } else { let ty = def.ty(); println!("Failed to call AdtDef::ty_with_args(). Fallback type: {:?}", ty); ty };
     tv.serialize_field(&ty)?;
     tv.end()
 }
