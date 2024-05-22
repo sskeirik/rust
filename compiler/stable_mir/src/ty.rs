@@ -7,6 +7,7 @@ use crate::mir::alloc::{read_target_int, read_target_uint, AllocId};
 use crate::target::MachineInfo;
 use crate::{crate_def::CrateDef, mir::mono::StaticDef};
 use crate::{Filename, Opaque};
+use crate::cycle_check;
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Range;
 use serde::{Serialize, Serializer, ser::{SerializeStruct, SerializeTupleVariant, Error as SerError}};
@@ -20,7 +21,14 @@ impl Serialize for Ty {
         S: Serializer,
     {
         println!("Serialize: {:?}", self);
-        serializer.serialize_newtype_struct("Ty",&self.kind())
+        if cycle_check(|scc| scc.types.contains(self)) {
+            serializer.serialize_newtype_struct("Ty",&self.0)
+        } else {
+             cycle_check(|scc| scc.types.insert(*self));
+             let ser = serializer.serialize_newtype_struct("Ty",&self.kind());
+             cycle_check(|scc| scc.types.remove(self));
+             ser
+        }
     }
 }
 

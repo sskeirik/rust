@@ -17,6 +17,7 @@
 //! The goal is to eventually be published on
 //! [crates.io](https://crates.io).
 
+use std::cell::{Cell, RefCell};
 use std::fmt;
 use std::fmt::Debug;
 use std::io;
@@ -28,8 +29,9 @@ pub use crate::error::*;
 use crate::mir::Body;
 use crate::mir::Mutability;
 use crate::ty::{ForeignModuleDef, ImplDef, IndexedVal, Span, TraitDef, Ty};
+use scoped_tls::scoped_thread_local;
 use serde::{Serialize, Serializer};
-pub use serde_json;
+use serde_json;
 
 pub mod abi;
 #[macro_use]
@@ -216,4 +218,34 @@ impl std::fmt::Debug for Opaque {
 
 pub fn opaque<T: Debug>(value: &T) -> Opaque {
     Opaque(format!("{value:?}"))
+}
+
+#[derive(Default)]
+struct SerializeCycleCheck {
+    types: rustc_data_structures::fx::FxHashSet<Ty>,
+}
+
+
+// A thread local variable that stores a pointer to the seen sets for recursive, interned values
+// so that we can avoid infinite looping when printing them out
+scoped_thread_local! (static TLV: Cell<*const ()>);
+
+pub(crate) fn cycle_check<R>(f: impl for<'tcx> FnOnce(&mut SerializeCycleCheck) -> R) -> R {
+    assert!(TLV.is_set());
+    TLV.with(|tlv| {
+        let ptr = tlv.get();
+        assert!(!ptr.is_null());
+        let wrapper = ptr as *const RefCell<SerializeCycleCheck>;
+        let mut scc = unsafe { (*wrapper).borrow_mut() };
+        f(&mut *scc)
+    })
+}
+
+pub fn to_json<S>(value: S) -> Result<String, serde_json::Error>
+where S : Serialize
+{
+    assert!(!TLV.is_set());
+    let scc: RefCell<SerializeCycleCheck> = RefCell::new(std::default::Default::default());
+    let ptr = &scc as *const _ as *const ();
+    TLV.set(&Cell::new(ptr), || serde_json::to_string(&value))
 }
