@@ -1087,7 +1087,7 @@ pub enum AliasKind {
     Weak,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AliasTy {
     pub def_id: AliasDef,
     pub args: GenericArgs,
@@ -1104,12 +1104,32 @@ impl Serialize for AliasTy {
     where
         S: Serializer,
     {
-       println!("Serialize: {:?}", self);
-        let mut tv = serializer.serialize_struct("Alias",2)?;
-        tv.serialize_field("def_id",&with(|cx| cx.def_ty_with_args(self.def_id.def_id(), &self.args)))?;
-        tv.serialize_field("args", &self.args)?;
-        tv.end()
+        serialize_alias_args(&self.def_id, &self.args, serializer)
     }
+}
+
+impl Serialize for AliasTerm {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serialize_alias_args(&self.def_id, &self.args, serializer)
+    }
+}
+
+fn serialize_alias_args<S>(
+    def_id: &AliasDef,
+    args: &GenericArgs,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    println!("Serialize: {:?} {:?}", def_id, args);
+    let mut cs = serializer.serialize_struct("Alias", 2)?;
+    cs.serialize_field("def_id", &with(|cx| cx.def_ty_with_args(def_id.def_id(), args)))?;
+    cs.serialize_field("args", args)?;
+    cs.end()
 }
 
 pub type PolyFnSig = Binder<FnSig>;
