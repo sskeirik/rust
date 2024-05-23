@@ -586,7 +586,9 @@ where
     S: Serializer,
 {
     println!("Serialize: {:?} {:?}", def, args);
-    let mut cs = ser.serialize_tuple_variant("RigidTy", 13, "FnDef", 1)?;
+    let mut cs = ser.serialize_tuple_variant("RigidTy", 13, "FnDef", 3)?;
+    cs.serialize_field(&def.def_id())?;
+    cs.serialize_field(&args)?;
     let sig = TyKind::RigidTy(RigidTy::FnDef(*def, args.clone()))
         .fn_sig()
         .ok_or(S::Error::custom("RigidTy::FnDef serialization failed"))?;
@@ -603,10 +605,12 @@ where
     S: Serializer,
 {
     println!("Serialize: {:?} {:?}", def, args);
-    let mut cs = ser.serialize_tuple_variant("RigidTy", 14, "ClosureDef", 1)?;
+    let mut cs = ser.serialize_tuple_variant("RigidTy", 14, "ClosureDef", 3)?;
     let sig = TyKind::RigidTy(RigidTy::Closure(*def, args.clone()))
         .fn_sig()
         .ok_or(S::Error::custom("RigidTy::Closure serialization failed"))?;
+    cs.serialize_field(&def.def_id())?;
+    cs.serialize_field(&args)?;
     cs.serialize_field(&sig)?;
     // TODO: the following might work better, if we knew how to instantiate it
     // cs.serialize_field(&with(|cx| cx.resolve_closure(*def, args, /* which closure kind??? */)))?;
