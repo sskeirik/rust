@@ -569,7 +569,9 @@ where
     S: Serializer,
 {
     println!("Serialize: {:?} {:?}", def, args);
-    let mut cs = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 1)?;
+    let mut cs = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 3)?;
+    cs.serialize_field(&def.def_id())?;
+    cs.serialize_field(&args)?;
     let ty = if let Some(ty) = def.ty_with_args(args) {
         ty
     } else {
