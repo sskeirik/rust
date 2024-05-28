@@ -293,7 +293,7 @@ where
         {
             let mut cs = serializer.serialize_struct("AliasTy", 2)?;
             match self.1 {
-                AliasKind::Projection => cs.serialize_field("id", &self.0.def_id.def_id())?,
+                AliasKind::Projection => cs.serialize_field("id", &self.0.def_id)?,
                 _ => cs.serialize_field("ty", &with(|cx| cx.def_ty_with_args(self.0.def_id.def_id(), &self.0.args)))?,
             };
             cs.serialize_field("args", &self.0.args)?;
@@ -941,8 +941,19 @@ impl AdtKind {
 }
 
 crate_def! {
-    #[derive(Serialize)]
     pub AliasDef;
+}
+
+impl Serialize for AliasDef {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut cs = serializer.serialize_tuple_struct("AliasDef", 2)?;
+        cs.serialize_field(&self.def_id())?;
+        cs.serialize_field(&self.name())?;
+        cs.end()
+    }
 }
 
 crate_def! {
