@@ -1289,9 +1289,17 @@ impl ExistentialTraitRef {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct ExistentialProjection {
+    #[serde(serialize_with = "serialize_cratedef")]
     pub def_id: TraitDef,
     pub generic_args: GenericArgs,
     pub term: TermKind,
+}
+
+fn serialize_cratedef<S>(def: &impl CrateDef, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_newtype_struct("DefId", &def.def_id())
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
