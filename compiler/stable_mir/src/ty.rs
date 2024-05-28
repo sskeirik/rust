@@ -285,17 +285,17 @@ fn serialize_alias<S>(akind: &AliasKind, aty: &AliasTy, serializer: S) -> Result
 where
     S: Serializer,
 {
-    struct AliasTyExtra<'a>(&'a AliasTy);
+    struct AliasTyExtra<'a>(&'a AliasTy, &'a AliasKind);
     impl Serialize for AliasTyExtra<'_> {
         fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
             let mut cs = serializer.serialize_struct("AliasTy", 2)?;
-            cs.serialize_field(
-                "def_id",
-                &with(|cx| cx.def_ty_with_args(self.0.def_id.def_id(), &self.0.args)),
-            )?;
+            match self.1 {
+                AliasKind::Projection => cs.serialize_field("id", &self.0.def_id.def_id())?,
+                _ => cs.serialize_field("ty", &with(|cx| cx.def_ty_with_args(self.0.def_id.def_id(), &self.0.args)))?,
+            };
             cs.serialize_field("args", &self.0.args)?;
             cs.end()
         }
@@ -304,11 +304,7 @@ where
     println!("Serialize: {:?} {:?}", akind, aty);
     let mut cs = serializer.serialize_tuple_struct("Alias", 2)?;
     cs.serialize_field(akind)?;
-    if *akind == AliasKind::Opaque {
-        cs.serialize_field(&AliasTyExtra(aty))?;
-    } else {
-        cs.serialize_field(aty)?;
-    }
+    cs.serialize_field(&AliasTyExtra(aty,&akind))?;
     cs.end()
 }
 
