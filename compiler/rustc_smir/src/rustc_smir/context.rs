@@ -419,15 +419,14 @@ impl<'tcx> Context for TablesWrapper<'tcx> {
         &self,
         item: stable_mir::DefId,
         args: &GenericArgs,
-    ) -> Option<stable_mir::ty::Ty> {
+    ) -> stable_mir::ty::Ty {
         let mut tables = self.0.borrow_mut();
         let tcx = tables.tcx;
         let args = args.internal(&mut *tables, tcx);
         let def_ty = tables.tcx.type_of(item.internal(&mut *tables, tcx));
         tables
             .tcx
-            .try_instantiate_and_normalize_erasing_regions(args, ty::ParamEnv::reveal_all(), def_ty)
-            .ok()
+            .instantiate_and_normalize_erasing_regions(args, ty::ParamEnv::reveal_all(), def_ty)
             .stable(&mut *tables)
     }
 

@@ -599,7 +599,7 @@ impl Rvalue {
                     &ops.iter().map(|op| op.ty(locals)).collect::<Result<Vec<_>, _>>()?,
                 )),
                 AggregateKind::Adt(def, _, ref args, _, _) => {
-                    Ok(def.ty_with_args(args).expect("Normalization failed"))
+                    Ok(def.ty_with_args(args))
                 }
                 AggregateKind::Closure(def, ref args) => Ok(Ty::new_closure(def, args.clone())),
                 AggregateKind::Coroutine(def, ref args, mov) => {

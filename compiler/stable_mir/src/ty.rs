@@ -568,13 +568,7 @@ where
     let mut cs = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 3)?;
     cs.serialize_field(&def.def_id())?;
     cs.serialize_field(&args)?;
-    let ty = if let Some(ty) = def.ty_with_args(args) {
-        ty
-    } else {
-        let ty = def.ty();
-        println!("Failed to call AdtDef::ty_with_args(). Fallback type: {:?}", ty);
-        ty
-    };
+    let ty = def.ty_with_args(args);
     cs.serialize_field(&ty)?;
     cs.end()
 }
@@ -827,7 +821,7 @@ impl AdtDef {
     /// Retrieve the type of this Adt by instantiating and normalizing it with the given arguments.
     ///
     /// This will assume the type can be instantiated with these arguments.
-    pub fn ty_with_args(&self, args: &GenericArgs) -> Option<Ty> {
+    pub fn ty_with_args(&self, args: &GenericArgs) -> Ty {
         with(|cx| cx.def_ty_with_args(self.0, args))
     }
 
@@ -906,7 +900,7 @@ impl FieldDef {
     /// Retrieve the type of this field instantiating and normalizing it with the given arguments.
     ///
     /// This will assume the type can be instantiated with these arguments.
-    pub fn ty_with_args(&self, args: &GenericArgs) -> Option<Ty> {
+    pub fn ty_with_args(&self, args: &GenericArgs) -> Ty {
         with(|cx| cx.def_ty_with_args(self.def, args))
     }
 
