@@ -564,11 +564,12 @@ fn serialize_adtdef<S>(def: &AdtDef, args: &GenericArgs, ser: S) -> Result<S::Ok
 where
     S: Serializer,
 {
-    println!("Serialize: {:?} {:?}", def, args);
+    eprintln!("Called serialize_adtdef {:?} {:?}", def, args);
     let mut cs = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 3)?;
     cs.serialize_field(&def.def_id())?;
+    let has_proj = args.0.clone().into_iter().any(|x| if let GenericArgKind::Type(y) = x { matches!(y.kind(), TyKind::Alias(AliasKind::Projection, _)) } else { false } );
     cs.serialize_field(&args)?;
-    let ty = def.ty_with_args(args);
+    let ty = if ! has_proj { def.ty_with_args(args) } else { def.ty() };
     cs.serialize_field(&ty)?;
     cs.end()
 }
