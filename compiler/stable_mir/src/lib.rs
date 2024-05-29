@@ -17,7 +17,8 @@
 //! The goal is to eventually be published on
 //! [crates.io](https://crates.io).
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::fmt;
 use std::fmt::Debug;
 use std::io;

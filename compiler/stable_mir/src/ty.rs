@@ -14,6 +14,7 @@ use serde::{
 };
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Range;
+// use std::backtrace::Backtrace;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct Ty(usize);
@@ -27,6 +28,7 @@ impl Serialize for Ty {
         let mut cs = serializer.serialize_struct("Ty", 2)?;
         cs.serialize_field("id", &self.0)?;
         if cycle_check(|scc| scc.types.contains(self)) {
+            eprintln!("Cycling at type ({}, {:?})", self.0, self.kind());
             cs.serialize_field("kind", &Option::<TyKind>::None)?;
         } else {
             cycle_check(|scc| scc.types.insert(*self));
@@ -560,6 +562,13 @@ pub enum RigidTy {
     CoroutineWitness(CoroutineWitnessDef, GenericArgs), // TODO: what is the best way to process?
 }
 
+fn get_adtdef(ty: TyKind) -> (AdtDef, GenericArgs)  {
+    if let TyKind::RigidTy(RigidTy::Adt(def, args)) = ty {
+        return (def, args);
+    }
+    panic!("This should not be called on non-adt types");
+}
+
 fn serialize_adtdef<S>(def: &AdtDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -570,7 +579,10 @@ where
     let ty = def.ty(); 
     let ty2 = def.ty_with_args(args);
     if ty != ty2 || ty.kind() != ty2.kind() {
-        eprintln!("serialize_adtdef: TyEq: {} TyKindEq: {}", ty != ty2, ty.kind() != ty2.kind());
+        eprintln!("serialize_adtdef: PrintTypes\n{:?}\n{:?}", ty.kind(), ty2.kind());
+        eprintln!("serialize_adtdef: EqualTypes({},{})",
+          get_adtdef(ty.kind() ) == (*def,args.clone()),
+          get_adtdef(ty2.kind()) == (*def,args.clone()));
     }
     cs.serialize_field(&ty)?;
     cs.serialize_field(&def.def_id())?;
