@@ -24,7 +24,7 @@ impl Serialize for Ty {
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
+        eprintln!("Serialize: {:?}", self);
         let mut cs = serializer.serialize_struct("Ty", 2)?;
         cs.serialize_field("id", &self.0)?;
         if cycle_check(|scc| scc.types.contains(self)) {
@@ -303,7 +303,7 @@ where
         }
     }
 
-    println!("Serialize: {:?} {:?}", akind, aty);
+    eprintln!("Serialize: {:?} {:?}", akind, aty);
     let mut cs = serializer.serialize_tuple_struct("Alias", 2)?;
     cs.serialize_field(akind)?;
     cs.serialize_field(&AliasTyExtra(aty,&akind))?;
@@ -594,7 +594,7 @@ fn serialize_fndef<S>(def: &FnDef, args: &GenericArgs, ser: S) -> Result<S::Ok, 
 where
     S: Serializer,
 {
-    println!("Serialize: {:?} {:?}", def, args);
+    eprintln!("Serialize: {:?} {:?}", def, args);
     let mut cs = ser.serialize_tuple_variant("RigidTy", 13, "FnDef", 3)?;
     cs.serialize_field(&def.def_id())?;
     cs.serialize_field(&args)?;
@@ -613,7 +613,7 @@ pub(crate) fn serialize_closuredef<S>(
 where
     S: Serializer,
 {
-    println!("Serialize: {:?} {:?}", def, args);
+    eprintln!("Serialize: {:?} {:?}", def, args);
     let mut cs = ser.serialize_tuple_variant("RigidTy", 14, "ClosureDef", 3)?;
     let sig = TyKind::RigidTy(RigidTy::Closure(*def, args.clone()))
         .fn_sig()
@@ -706,7 +706,7 @@ impl Serialize for ForeignModuleDef {
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
+        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("ForeignModuleDef", &self.module())
     }
 }
@@ -734,7 +734,7 @@ impl Serialize for ForeignModule {
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
+        eprintln!("Serialize: {:?}", self);
         let mut s = serializer.serialize_struct("ForeignModule", 2)?;
         s.serialize_field("def_id", &self.def_id.0)?;
         s.serialize_field("abi", &self.abi)?;
@@ -752,7 +752,7 @@ impl Serialize for ForeignDef {
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
+        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("ForeignDef", &self.kind())
     }
 }
@@ -780,7 +780,7 @@ impl Serialize for FnDef {
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
+        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("FnDef", &with(|cx| cx.def_ty(self.def_id())))
         // TODO: the following would be more interesting, but not sure where to recover the generic args
         // serializer.serialize_newtype_struct("FnDef", with(|cx| cx.fn_sig(*self, /* missing GenericArgs type */)))
@@ -978,7 +978,7 @@ impl Serialize for TraitDef {
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
+        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("TraitDef", &TraitDef::declaration(self))
     }
 }
@@ -1009,7 +1009,7 @@ impl Serialize for ImplDef {
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
+        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("ImplDef", &self.trait_impl())
     }
 }
@@ -1149,7 +1149,7 @@ fn serialize_alias_args<S>(
 where
     S: Serializer,
 {
-    println!("Serialize: {:?} {:?}", def_id, args);
+    eprintln!("Serialize: {:?} {:?}", def_id, args);
     let mut cs = serializer.serialize_struct("Alias", 2)?;
     cs.serialize_field("def_id", &with(|cx| cx.def_ty_with_args(def_id.def_id(), args)))?;
     cs.serialize_field("args", args)?;
