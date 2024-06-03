@@ -28,7 +28,7 @@ impl Serialize for Ty {
         let mut cs = serializer.serialize_struct("Ty", 2)?;
         cs.serialize_field("id", &self.0)?;
         if cycle_check(|scc| scc.types.contains(self)) {
-            eprintln!("Cycling at type ({}, {:?})", self.0, self.kind());
+            debug!("Cycling at type ({}, {:?})", self.0, self.kind());
             cs.serialize_field("kind", &Option::<TyKind>::None)?;
         } else {
             cycle_check(|scc| scc.types.insert(*self));
