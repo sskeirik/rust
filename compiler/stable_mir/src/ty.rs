@@ -126,13 +126,13 @@ impl Ty {
 
 derive_serialize! {
 /// Represents a pattern in the type system
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum Pattern {
     Range { start: Option<Const>, end: Option<Const>, include_end: bool },
 }
 
 /// Represents a constant in MIR or from the Type system.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Const {
     /// The constant kind.
     pub(crate) kind: ConstantKind,
@@ -196,19 +196,19 @@ impl Const {
 }
 
 derive_serialize! {
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct ConstId(usize);
 }
 
 type Ident = Opaque;
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Region {
     pub kind: RegionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RegionKind {
     ReEarlyParam(EarlyParamRegion),
     ReBound(DebruijnIndex, BoundRegion),
@@ -221,7 +221,7 @@ pub enum RegionKind {
 pub(crate) type DebruijnIndex = u32;
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct EarlyParamRegion {
     pub def_id: RegionDef,
     pub index: u32,
@@ -232,7 +232,7 @@ pub struct EarlyParamRegion {
 pub(crate) type BoundVar = u32;
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct BoundRegion {
     pub var: BoundVar,
     pub kind: BoundRegionKind,
@@ -241,14 +241,14 @@ pub struct BoundRegion {
 
 pub(crate) type UniverseIndex = u32;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Hash)]
 pub struct Placeholder<T> {
     pub universe: UniverseIndex,
     pub bound: T,
 }
 
 derive_serialize! {
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Span(usize);
 }
 
@@ -274,7 +274,7 @@ impl Span {
 }
 
 derive_serialize! {
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash)]
 /// Information you get from `Span` in a struct form.
 /// Line and col start from 1.
 pub struct LineInfo {
@@ -284,7 +284,7 @@ pub struct LineInfo {
     pub end_col: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum TyKind {
     RigidTy(RigidTy),
     #[serde(serialize_with = "serialize_alias")]
@@ -547,7 +547,7 @@ pub struct TypeAndMut {
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RigidTy {
     Bool,
     Char,
@@ -585,6 +585,19 @@ fn get_adtdef(ty: TyKind) -> (AdtDef, GenericArgs)  {
     panic!("This should not be called on non-adt types");
 }
 
+fn vec_to_set<T>(v: Vec<T>) -> rustc_data_structures::fx::FxHashSet<T> where T: Eq, T: std::hash::Hash {
+    rustc_data_structures::fx::FxHashSet::<T>::from_iter(v.into_iter())
+}
+
+macro_rules! visualize_diff {
+    ($a:expr, $an:expr, $b:expr, $bn:expr) => {
+        if $a != $b {
+            debug!("Only {}: {:?}, Only {}: {:?}", $an, $a.difference($b).collect::<Vec<_>>(), $bn, $b.difference($a).collect::<Vec<_>>());
+        }
+    }
+}
+ 
+#[allow(rustc::potential_query_instability)]
 #[instrument(level = "debug", skip(ser))]
 fn serialize_adtdef<S>(def: &AdtDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
 where
@@ -597,10 +610,12 @@ where
                                           // adtdef.ty_with_args(vec![GenericArgKind::Type(RigidTy(uint32))]) => std::Option<uint32> 
                                           // adtdef.ty_with_args(vec![GenericArgKind::Type(Alias(projection, FnOnce::Output))]) => std::Option<???> // crash!
     if ty != ty2 || ty.kind() != ty2.kind() {
-        eprintln!("serialize_adtdef: PrintTypes\n{:?}\n{:?}", ty.kind(), ty2.kind());
-        eprintln!("serialize_adtdef: EqualTypes({},{})",
-          get_adtdef(ty.kind() ) == (*def,args.clone()),
-          get_adtdef(ty2.kind()) == (*def,args.clone()));
+        let (d1, a1) = get_adtdef(ty.kind());
+        let (d2, a2) = get_adtdef(ty2.kind());
+        if &d1 != def || &d2 != def { panic!("def.ty() or def.ty_with_args() did not return RigidTy::Adt") }
+        let (s,s1,s2) = (vec_to_set(args.0.clone()), vec_to_set(a1.0), vec_to_set(a2.0));
+        visualize_diff!(&s, "src", &s1, "def.ty()");
+        visualize_diff!(&s, "src", &s2, "def.ty_with_args()");
     }
     cs.serialize_field(&ty)?;
     cs.serialize_field(&def.def_id())?;
@@ -658,7 +673,7 @@ impl From<RigidTy> for TyKind {
 }
 
 derive_serialize! {
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum IntTy {
     Isize,
     I8,
@@ -683,7 +698,7 @@ impl IntTy {
 }
 
 derive_serialize! {
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum UintTy {
     Usize,
     U8,
@@ -708,13 +723,13 @@ impl UintTy {
 }
 
 derive_serialize! {
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum FloatTy {
     F32,
     F64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Movability {
     Static,
     Movable,
@@ -932,7 +947,7 @@ impl VariantDef {
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FieldDef {
     /// The field definition.
     ///
@@ -1065,7 +1080,7 @@ crate_def! {
 }
 
 /// A list of generic arguments.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GenericArgs(pub Vec<GenericArgKind>);
 
 impl Serialize for GenericArgs {
@@ -1095,7 +1110,7 @@ impl std::ops::Index<ParamConst> for GenericArgs {
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum GenericArgKind {
     Lifetime(Region),
     Type(Ty),
@@ -1134,13 +1149,13 @@ impl GenericArgKind {
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum TermKind {
     Type(Ty),
     Const(Const),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AliasKind {
     Projection,
     Inherent,
@@ -1149,13 +1164,13 @@ pub enum AliasKind {
 }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AliasTy {
     pub def_id: AliasDef,
     pub args: GenericArgs,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct AliasTerm {
     pub def_id: AliasDef,
     pub args: GenericArgs,
@@ -1199,7 +1214,7 @@ where
 pub type PolyFnSig = Binder<FnSig>;
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FnSig {
     pub inputs_and_output: Vec<Ty>,
     pub c_variadic: bool,
@@ -1219,7 +1234,7 @@ impl FnSig {
 }
 
 derive_serialize! {
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub enum Abi {
     Rust,
     C { unwind: bool },
@@ -1250,7 +1265,7 @@ pub enum Abi {
 }
 
 /// A binder represents a possibly generic type and its bound vars.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Hash)]
 pub struct Binder<T> {
     pub value: T,
     pub bound_vars: Vec<BoundVariableKind>,
@@ -1290,39 +1305,39 @@ impl<T> Binder<T> {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Hash)]
 pub struct EarlyBinder<T> {
     pub value: T,
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum BoundVariableKind {
     Ty(BoundTyKind),
     Region(BoundRegionKind),
     Const,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug)]
+#[derive(Clone, PartialEq, Eq, Debug, Hash)]
 pub enum BoundTyKind {
     Anon,
     Param(ParamDef, String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum BoundRegionKind {
     BrAnon,
     BrNamed(BrNamedDef, String),
     BrEnv,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum DynKind {
     Dyn,
     DynStar,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ExistentialPredicate {
     Trait(ExistentialTraitRef),
     Projection(ExistentialProjection),
@@ -1332,7 +1347,7 @@ pub enum ExistentialPredicate {
 /// An existential reference to a trait where `Self` is not included.
 ///
 /// The `generic_args` will include any other known argument.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ExistentialTraitRef {
     pub def_id: TraitDef,
     pub generic_args: GenericArgs,
@@ -1352,7 +1367,7 @@ impl ExistentialTraitRef {
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ExistentialProjection {
     #[serde(serialize_with = "serialize_cratedef")]
     pub def_id: TraitDef,
@@ -1370,13 +1385,13 @@ where
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ParamTy {
     pub index: u32,
     pub name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct BoundTy {
     pub var: usize,
     pub kind: BoundTyKind,
@@ -1500,7 +1515,7 @@ derive_serialize! {
 //         mir::ConstValue::ZeroSized -> ConstantKind::ZeroSized
 //         v                          -> ConstandKind::Allocated(v)
 //
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ConstantKind {
     Allocated(Allocation), // collasped ConstAllocation/Allocation
     // from mir::Const::Val
@@ -1513,27 +1528,27 @@ pub enum ConstantKind {
                                    // and from ty::Const::Value that converts to mir::Const::Val(ZeroSized)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ParamConst {
     pub index: u32,
     pub name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct UnevaluatedConst {
     pub def: ConstDef,
     pub args: GenericArgs,
     pub promoted: Option<Promoted>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum TraitSpecializationKind {
     None,
     Marker,
     AlwaysApplicable,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TraitDecl {
     #[serde(skip)] // skip serializing this field to avoid recursive cycles
     pub def_id: TraitDef,
@@ -1569,7 +1584,7 @@ pub type ImplTrait = EarlyBinder<TraitRef>;
 
 derive_serialize! {
 /// A complete reference to a trait, i.e., one where `Self` is known.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TraitRef {
     pub def_id: TraitDef,
     /// The generic arguments for this definition.
@@ -1605,7 +1620,7 @@ impl TraitRef {
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Generics {
     pub parent: Option<GenericDef>,
     pub parent_count: usize,
@@ -1616,14 +1631,14 @@ pub struct Generics {
     pub host_effect_index: Option<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum GenericParamDefKind {
     Lifetime,
     Type { has_default: bool, synthetic: bool },
     Const { has_default: bool },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct GenericParamDef {
     pub name: super::Symbol,
     pub def_id: GenericDef,
@@ -1639,7 +1654,7 @@ pub struct GenericPredicates {
 }
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PredicateKind {
     Clause(ClauseKind),
     ObjectSafe(TraitDef),
@@ -1650,7 +1665,7 @@ pub enum PredicateKind {
     AliasRelate(TermKind, TermKind, AliasRelationDirection),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ClauseKind {
     Trait(TraitPredicate),
     RegionOutlives(RegionOutlivesPredicate),
@@ -1661,59 +1676,59 @@ pub enum ClauseKind {
     ConstEvaluatable(Const),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ClosureKind {
     Fn,
     FnMut,
     FnOnce,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct SubtypePredicate {
     pub a: Ty,
     pub b: Ty,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct CoercePredicate {
     pub a: Ty,
     pub b: Ty,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum AliasRelationDirection {
     Equate,
     Subtype,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct TraitPredicate {
     pub trait_ref: TraitRef,
     pub polarity: PredicatePolarity,
 }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Hash)]
 pub struct OutlivesPredicate<A, B>(pub A, pub B);
 
 pub type RegionOutlivesPredicate = OutlivesPredicate<Region, Region>;
 pub type TypeOutlivesPredicate = OutlivesPredicate<Ty, Region>;
 
 derive_serialize! {
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ProjectionPredicate {
     pub projection_term: AliasTerm,
     pub term: TermKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ImplPolarity {
     Positive,
     Negative,
     Reservation,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum PredicatePolarity {
     Positive,
     Negative,
