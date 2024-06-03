@@ -617,7 +617,6 @@ where
         visualize_diff!(&s, "src", &s1, "def.ty()");
         visualize_diff!(&s, "src", &s2, "def.ty_with_args()");
     }
-    cs.serialize_field(&ty)?;
     cs.serialize_field(&def.def_id())?;
     cs.serialize_field(&args)?;
     cs.end()
