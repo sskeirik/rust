@@ -20,11 +20,11 @@ use std::ops::Range;
 pub struct Ty(usize);
 
 impl Serialize for Ty {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        eprintln!("Serialize: {:?}", self);
         let mut cs = serializer.serialize_struct("Ty", 2)?;
         cs.serialize_field("id", &self.0)?;
         if cycle_check(|scc| scc.types.contains(self)) {
@@ -124,14 +124,15 @@ impl Ty {
     }
 }
 
+derive_serialize! {
 /// Represents a pattern in the type system
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Pattern {
     Range { start: Option<Const>, end: Option<Const>, include_end: bool },
 }
 
 /// Represents a constant in MIR or from the Type system.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Const {
     /// The constant kind.
     pub(crate) kind: ConstantKind,
@@ -139,6 +140,7 @@ pub struct Const {
     pub(crate) ty: Ty,
     /// Used for internal tracking of the internal constant.
     pub id: ConstId,
+}
 }
 
 impl Const {
@@ -193,17 +195,20 @@ impl Const {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ConstId(usize);
+}
 
 type Ident = Opaque;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Region {
     pub kind: RegionKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RegionKind {
     ReEarlyParam(EarlyParamRegion),
     ReBound(DebruijnIndex, BoundRegion),
@@ -211,22 +216,27 @@ pub enum RegionKind {
     RePlaceholder(Placeholder<BoundRegion>),
     ReErased,
 }
+}
 
 pub(crate) type DebruijnIndex = u32;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EarlyParamRegion {
     pub def_id: RegionDef,
     pub index: u32,
     pub name: Symbol,
 }
+}
 
 pub(crate) type BoundVar = u32;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoundRegion {
     pub var: BoundVar,
     pub kind: BoundRegionKind,
+}
 }
 
 pub(crate) type UniverseIndex = u32;
@@ -237,8 +247,10 @@ pub struct Placeholder<T> {
     pub bound: T,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct Span(usize);
+}
 
 impl Debug for Span {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -261,7 +273,8 @@ impl Span {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, Debug)]
 /// Information you get from `Span` in a struct form.
 /// Line and col start from 1.
 pub struct LineInfo {
@@ -271,7 +284,7 @@ pub struct LineInfo {
     pub end_col: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TyKind {
     RigidTy(RigidTy),
     #[serde(serialize_with = "serialize_alias")]
@@ -282,7 +295,9 @@ pub enum TyKind {
     // usize param is DebruijnIndex, second param is wrapped u32 that represents bound variable identifier
     Bound(usize, BoundTy),
 }
+}
 
+#[instrument(level = "debug", skip(serializer))]
 fn serialize_alias<S>(akind: &AliasKind, aty: &AliasTy, serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -303,7 +318,6 @@ where
         }
     }
 
-    eprintln!("Serialize: {:?} {:?}", akind, aty);
     let mut cs = serializer.serialize_tuple_struct("Alias", 2)?;
     cs.serialize_field(akind)?;
     cs.serialize_field(&AliasTyExtra(aty,&akind))?;
@@ -532,7 +546,8 @@ pub struct TypeAndMut {
     pub mutability: Mutability,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RigidTy {
     Bool,
     Char,
@@ -561,6 +576,7 @@ pub enum RigidTy {
     Tuple(Vec<Ty>),
     CoroutineWitness(CoroutineWitnessDef, GenericArgs), // TODO: what is the best way to process?
 }
+}
 
 fn get_adtdef(ty: TyKind) -> (AdtDef, GenericArgs)  {
     if let TyKind::RigidTy(RigidTy::Adt(def, args)) = ty {
@@ -569,15 +585,17 @@ fn get_adtdef(ty: TyKind) -> (AdtDef, GenericArgs)  {
     panic!("This should not be called on non-adt types");
 }
 
+#[instrument(level = "debug", skip(ser))]
 fn serialize_adtdef<S>(def: &AdtDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    eprintln!("serialize_adtdef: Call {:?} {:?}", def, args);
     let mut cs = ser.serialize_tuple_variant("RigidTy", 5, "AdtDef", 3)?;
     // let has_proj = args.0.clone().into_iter().any(|x| if let GenericArgKind::Type(y) = x { matches!(y.kind(), TyKind::Alias(AliasKind::Projection, _)) } else { false } );
     let ty = def.ty(); 
-    let ty2 = def.ty_with_args(args);
+    let ty2 = def.ty_with_args(args); // AdtDef: std::Option<T>, adtdef.ty()                              => std::Option<T>
+                                          // adtdef.ty_with_args(vec![GenericArgKind::Type(RigidTy(uint32))]) => std::Option<uint32> 
+                                          // adtdef.ty_with_args(vec![GenericArgKind::Type(Alias(projection, FnOnce::Output))]) => std::Option<???> // crash!
     if ty != ty2 || ty.kind() != ty2.kind() {
         eprintln!("serialize_adtdef: PrintTypes\n{:?}\n{:?}", ty.kind(), ty2.kind());
         eprintln!("serialize_adtdef: EqualTypes({},{})",
@@ -590,11 +608,11 @@ where
     cs.end()
 }
 
+#[instrument(level = "debug", skip(ser))]
 fn serialize_fndef<S>(def: &FnDef, args: &GenericArgs, ser: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
-    eprintln!("Serialize: {:?} {:?}", def, args);
     let mut cs = ser.serialize_tuple_variant("RigidTy", 13, "FnDef", 3)?;
     cs.serialize_field(&def.def_id())?;
     cs.serialize_field(&args)?;
@@ -605,6 +623,7 @@ where
     cs.end()
 }
 
+#[instrument(level = "debug", skip(ser))]
 pub(crate) fn serialize_closuredef<S>(
     def: &ClosureDef,
     args: &GenericArgs,
@@ -613,7 +632,6 @@ pub(crate) fn serialize_closuredef<S>(
 where
     S: Serializer,
 {
-    eprintln!("Serialize: {:?} {:?}", def, args);
     let mut cs = ser.serialize_tuple_variant("RigidTy", 14, "ClosureDef", 3)?;
     let sig = TyKind::RigidTy(RigidTy::Closure(*def, args.clone()))
         .fn_sig()
@@ -639,7 +657,8 @@ impl From<RigidTy> for TyKind {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum IntTy {
     Isize,
     I8,
@@ -647,6 +666,7 @@ pub enum IntTy {
     I32,
     I64,
     I128,
+}
 }
 
 impl IntTy {
@@ -662,7 +682,8 @@ impl IntTy {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum UintTy {
     Usize,
     U8,
@@ -670,6 +691,7 @@ pub enum UintTy {
     U32,
     U64,
     U128,
+}
 }
 
 impl UintTy {
@@ -685,16 +707,18 @@ impl UintTy {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FloatTy {
     F32,
     F64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Movability {
     Static,
     Movable,
+}
 }
 
 crate_def! {
@@ -702,11 +726,11 @@ crate_def! {
 }
 
 impl Serialize for ForeignModuleDef {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("ForeignModuleDef", &self.module())
     }
 }
@@ -730,11 +754,11 @@ impl ForeignModule {
 }
 
 impl Serialize for ForeignModule {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        eprintln!("Serialize: {:?}", self);
         let mut s = serializer.serialize_struct("ForeignModule", 2)?;
         s.serialize_field("def_id", &self.def_id.0)?;
         s.serialize_field("abi", &self.abi)?;
@@ -748,11 +772,11 @@ crate_def! {
 }
 
 impl Serialize for ForeignDef {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("ForeignDef", &self.kind())
     }
 }
@@ -763,11 +787,13 @@ impl ForeignDef {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum ForeignItemKind {
     Fn(FnDef),
     Static(StaticDef),
     Type(Ty),
+}
 }
 
 crate_def! {
@@ -776,11 +802,11 @@ crate_def! {
 }
 
 impl Serialize for FnDef {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("FnDef", &with(|cx| cx.def_ty(self.def_id())))
         // TODO: the following would be more interesting, but not sure where to recover the generic args
         // serializer.serialize_newtype_struct("FnDef", with(|cx| cx.fn_sig(*self, /* missing GenericArgs type */)))
@@ -818,11 +844,13 @@ crate_def! {
     pub AdtDef;
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub enum AdtKind {
     Enum,
     Union,
     Struct,
+}
 }
 
 impl AdtDef {
@@ -871,8 +899,9 @@ impl AdtDef {
     }
 }
 
+derive_serialize! {
 /// Definition of a variant, which can be either a struct / union field or an enum variant.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VariantDef {
     /// The variant index.
     ///
@@ -886,6 +915,7 @@ pub struct VariantDef {
     /// ## Warning
     /// Do not access this field directly!
     pub adt_def: AdtDef,
+}
 }
 
 impl VariantDef {
@@ -901,7 +931,8 @@ impl VariantDef {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FieldDef {
     /// The field definition.
     ///
@@ -911,6 +942,7 @@ pub struct FieldDef {
 
     /// The field name.
     pub name: Symbol,
+}
 }
 
 impl FieldDef {
@@ -956,6 +988,7 @@ crate_def! {
 }
 
 impl Serialize for AliasDef {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -974,11 +1007,11 @@ crate_def! {
 
 // TODO: check if more specialized expansions are needed
 impl Serialize for TraitDef {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("TraitDef", &TraitDef::declaration(self))
     }
 }
@@ -1005,11 +1038,11 @@ crate_def! {
 }
 
 impl Serialize for ImplDef {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        eprintln!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("ImplDef", &self.trait_impl())
     }
 }
@@ -1036,6 +1069,7 @@ crate_def! {
 pub struct GenericArgs(pub Vec<GenericArgKind>);
 
 impl Serialize for GenericArgs {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1060,11 +1094,13 @@ impl std::ops::Index<ParamConst> for GenericArgs {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GenericArgKind {
     Lifetime(Region),
     Type(Ty),
     Const(Const),
+}
 }
 
 impl GenericArgKind {
@@ -1097,18 +1133,20 @@ impl GenericArgKind {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TermKind {
     Type(Ty),
     Const(Const),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AliasKind {
     Projection,
     Inherent,
     Opaque,
     Weak,
+}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1124,6 +1162,7 @@ pub struct AliasTerm {
 }
 
 impl Serialize for AliasTy {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1133,6 +1172,7 @@ impl Serialize for AliasTy {
 }
 
 impl Serialize for AliasTerm {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -1141,6 +1181,7 @@ impl Serialize for AliasTerm {
     }
 }
 
+#[instrument(level = "debug", skip(serializer))]
 fn serialize_alias_args<S>(
     def_id: &AliasDef,
     args: &GenericArgs,
@@ -1149,7 +1190,6 @@ fn serialize_alias_args<S>(
 where
     S: Serializer,
 {
-    eprintln!("Serialize: {:?} {:?}", def_id, args);
     let mut cs = serializer.serialize_struct("Alias", 2)?;
     cs.serialize_field("def_id", &with(|cx| cx.def_ty_with_args(def_id.def_id(), args)))?;
     cs.serialize_field("args", args)?;
@@ -1158,12 +1198,14 @@ where
 
 pub type PolyFnSig = Binder<FnSig>;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct FnSig {
     pub inputs_and_output: Vec<Ty>,
     pub c_variadic: bool,
     pub safety: Safety,
     pub abi: Abi,
+}
 }
 
 impl FnSig {
@@ -1176,7 +1218,8 @@ impl FnSig {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+derive_serialize! {
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum Abi {
     Rust,
     C { unwind: bool },
@@ -1203,6 +1246,7 @@ pub enum Abi {
     RustCold,
     RiscvInterruptM,
     RiscvInterruptS,
+}
 }
 
 /// A binder represents a possibly generic type and its bound vars.
@@ -1251,33 +1295,34 @@ pub struct EarlyBinder<T> {
     pub value: T,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BoundVariableKind {
     Ty(BoundTyKind),
     Region(BoundRegionKind),
     Const,
 }
 
-#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub enum BoundTyKind {
     Anon,
     Param(ParamDef, String),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BoundRegionKind {
     BrAnon,
     BrNamed(BrNamedDef, String),
     BrEnv,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DynKind {
     Dyn,
     DynStar,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ExistentialPredicate {
     Trait(ExistentialTraitRef),
     Projection(ExistentialProjection),
@@ -1287,10 +1332,11 @@ pub enum ExistentialPredicate {
 /// An existential reference to a trait where `Self` is not included.
 ///
 /// The `generic_args` will include any other known argument.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExistentialTraitRef {
     pub def_id: TraitDef,
     pub generic_args: GenericArgs,
+}
 }
 
 impl Binder<ExistentialTraitRef> {
@@ -1305,31 +1351,36 @@ impl ExistentialTraitRef {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExistentialProjection {
     #[serde(serialize_with = "serialize_cratedef")]
     pub def_id: TraitDef,
     pub generic_args: GenericArgs,
     pub term: TermKind,
 }
+}
 
-fn serialize_cratedef<S>(def: &impl CrateDef, serializer: S) -> Result<S::Ok, S::Error>
+#[instrument(level = "debug", skip(serializer))]
+fn serialize_cratedef<S>(def: &(impl CrateDef + std::fmt::Debug), serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
 {
     serializer.serialize_newtype_struct("DefId", &def.def_id())
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParamTy {
     pub index: u32,
     pub name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BoundTy {
     pub var: usize,
     pub kind: BoundTyKind,
+}
 }
 
 pub type Bytes = Vec<Option<u8>>;
@@ -1337,27 +1388,31 @@ pub type Bytes = Vec<Option<u8>>;
 /// Size in bytes.
 pub type Size = usize;
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash)]
 pub struct Prov(pub AllocId);
+}
 
 pub type Align = u64;
 pub type Promoted = u32;
 pub type InitMaskMaterialized = Vec<u64>;
 
+derive_serialize! {
 /// Stores the provenance information of pointers stored in memory.
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct ProvenanceMap {
     /// Provenance in this map applies from the given offset for an entire pointer-size worth of
     /// bytes. Two entries in this map are always at least a pointer size apart.
     pub ptrs: Vec<(Size, Prov)>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct Allocation {
     pub bytes: Bytes,
     pub provenance: ProvenanceMap,
     pub align: Align,
     pub mutability: Mutability,
+}
 }
 
 impl Allocation {
@@ -1428,6 +1483,7 @@ impl Allocation {
     }
 }
 
+derive_serialize! {
 // stable_mir::ty::ConstantKind collapses two variants of Rust
 //
 // 1.  mir::Const::Ty(ty::Const)                      -> convert(...)
@@ -1444,7 +1500,7 @@ impl Allocation {
 //         mir::ConstValue::ZeroSized -> ConstantKind::ZeroSized
 //         v                          -> ConstandKind::Allocated(v)
 //
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ConstantKind {
     Allocated(Allocation), // collasped ConstAllocation/Allocation
     // from mir::Const::Val
@@ -1457,27 +1513,27 @@ pub enum ConstantKind {
                                    // and from ty::Const::Value that converts to mir::Const::Val(ZeroSized)
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ParamConst {
     pub index: u32,
     pub name: String,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UnevaluatedConst {
     pub def: ConstDef,
     pub args: GenericArgs,
     pub promoted: Option<Promoted>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TraitSpecializationKind {
     None,
     Marker,
     AlwaysApplicable,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TraitDecl {
     #[serde(skip)] // skip serializing this field to avoid recursive cycles
     pub def_id: TraitDef,
@@ -1492,6 +1548,7 @@ pub struct TraitDecl {
     pub must_implement_one_of: Option<Vec<Ident>>,
     pub implement_via_object: bool,
     pub deny_explicit_impl: bool,
+}
 }
 
 impl TraitDecl {
@@ -1510,13 +1567,15 @@ impl TraitDecl {
 
 pub type ImplTrait = EarlyBinder<TraitRef>;
 
+derive_serialize! {
 /// A complete reference to a trait, i.e., one where `Self` is known.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TraitRef {
     pub def_id: TraitDef,
     /// The generic arguments for this definition.
     /// The first element must always be type, and it represents `Self`.
     args: GenericArgs,
+}
 }
 
 impl TraitRef {
@@ -1545,7 +1604,8 @@ impl TraitRef {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Generics {
     pub parent: Option<GenericDef>,
     pub parent_count: usize,
@@ -1556,14 +1616,14 @@ pub struct Generics {
     pub host_effect_index: Option<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GenericParamDefKind {
     Lifetime,
     Type { has_default: bool, synthetic: bool },
     Const { has_default: bool },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GenericParamDef {
     pub name: super::Symbol,
     pub def_id: GenericDef,
@@ -1571,13 +1631,15 @@ pub struct GenericParamDef {
     pub pure_wrt_drop: bool,
     pub kind: GenericParamDefKind,
 }
+}
 
 pub struct GenericPredicates {
     pub parent: Option<TraitDef>,
     pub predicates: Vec<(PredicateKind, Span)>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PredicateKind {
     Clause(ClauseKind),
     ObjectSafe(TraitDef),
@@ -1588,7 +1650,7 @@ pub enum PredicateKind {
     AliasRelate(TermKind, TermKind, AliasRelationDirection),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClauseKind {
     Trait(TraitPredicate),
     RegionOutlives(RegionOutlivesPredicate),
@@ -1599,35 +1661,36 @@ pub enum ClauseKind {
     ConstEvaluatable(Const),
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClosureKind {
     Fn,
     FnMut,
     FnOnce,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SubtypePredicate {
     pub a: Ty,
     pub b: Ty,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CoercePredicate {
     pub a: Ty,
     pub b: Ty,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AliasRelationDirection {
     Equate,
     Subtype,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TraitPredicate {
     pub trait_ref: TraitRef,
     pub polarity: PredicatePolarity,
+}
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -1636,23 +1699,25 @@ pub struct OutlivesPredicate<A, B>(pub A, pub B);
 pub type RegionOutlivesPredicate = OutlivesPredicate<Region, Region>;
 pub type TypeOutlivesPredicate = OutlivesPredicate<Ty, Region>;
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectionPredicate {
     pub projection_term: AliasTerm,
     pub term: TermKind,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ImplPolarity {
     Positive,
     Negative,
     Reservation,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum PredicatePolarity {
     Positive,
     Negative,
+}
 }
 
 pub trait IndexedVal {
@@ -1678,6 +1743,7 @@ index_impl!(ConstId);
 index_impl!(Ty);
 index_impl!(Span);
 
+derive_serialize! {
 /// The source-order index of a variant in a type.
 ///
 /// For example, in the following types,
@@ -1691,7 +1757,8 @@ index_impl!(Span);
 /// `a` is in the variant with the `VariantIdx` of `0`,
 /// `c` is in the variant with the `VariantIdx` of `1`, and
 /// `g` is in the variant with the `VariantIdx` of `0`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct VariantIdx(usize);
+}
 
 index_impl!(VariantIdx);

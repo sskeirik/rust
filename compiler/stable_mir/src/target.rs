@@ -3,11 +3,13 @@
 use crate::compiler_interface::with;
 use serde::Serialize;
 
+derive_serialize! {
 /// The properties of the target machine being compiled into.
-#[derive(Clone, PartialEq, Eq, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct MachineInfo {
     pub endian: Endian,
     pub pointer_width: MachineSize,
+}
 }
 
 impl MachineInfo {
@@ -24,16 +26,18 @@ impl MachineInfo {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Serialize)]
+derive_serialize! {
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Endian {
     Little,
     Big,
 }
 
 /// Represent the size of a component.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub struct MachineSize {
     num_bits: usize,
+}
 }
 
 impl MachineSize {

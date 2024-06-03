@@ -7,11 +7,13 @@ use serde::{ser::SerializeStruct, Serialize, Serializer};
 use std::fmt::{Debug, Formatter};
 use std::io;
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum MonoItem {
     Fn(Instance),
     Static(StaticDef),
     GlobalAsm(Opaque),
+}
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash)]
@@ -24,11 +26,11 @@ pub struct Instance {
 }
 
 impl Serialize for Instance {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
         // TODO: check if we need to call instance APIs to retrieve missing info
         let mut cs = serializer.serialize_struct("Instance", 1)?;
         cs.serialize_field("kind", &self.kind)?;
@@ -36,7 +38,8 @@ impl Serialize for Instance {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+derive_serialize! {
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum InstanceKind {
     /// A user defined item.
     Item,
@@ -47,6 +50,7 @@ pub enum InstanceKind {
     Virtual { idx: usize },
     /// A compiler generated shim.
     Shim,
+}
 }
 
 impl Instance {
@@ -252,8 +256,10 @@ impl From<StaticDef> for CrateItem {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize)]
+derive_serialize! {
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct InstanceDef(usize);
+}
 
 impl CrateDef for InstanceDef {
     fn def_id(&self) -> DefId {

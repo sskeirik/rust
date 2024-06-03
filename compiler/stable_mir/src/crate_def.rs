@@ -5,9 +5,11 @@ use crate::ty::Span;
 use crate::{with, Crate, Symbol};
 use serde::Serialize;
 
+derive_serialize! {
 /// A unique identification number for each item accessible for the current compilation unit.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DefId(pub(crate) usize);
+}
 
 /// A trait for retrieving information about a particular definition.
 ///

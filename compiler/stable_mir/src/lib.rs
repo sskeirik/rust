@@ -33,6 +33,58 @@ use crate::ty::{ForeignModuleDef, ImplDef, IndexedVal, Span, TraitDef, Ty};
 use scoped_tls::scoped_thread_local;
 use serde::{Serialize, Serializer};
 use serde_json;
+#[macro_use]
+extern crate tracing;
+
+macro_rules! derive_serialize {
+    ($(#[$meta:meta])* $vis:vis enum $name:ident { $($item:tt)+ } $($items:tt)*) => {
+
+        $(#[$meta])*
+        #[derive(Serialize)]
+        #[serde(remote="Self")]
+        $vis enum $name { $($item)+ }
+
+        derive_serialize!(@impl $name);
+
+        derive_serialize!($($items)*);
+    } ;
+
+    ($(#[$meta:meta])* $vis:vis struct $name:ident { $($item:tt)+ } $($items:tt)*) => {
+
+        $(#[$meta])*
+        #[derive(Serialize)]
+        #[serde(remote="Self")]
+        $vis struct $name { $($item)+ }
+
+        derive_serialize!(@impl $name);
+
+        derive_serialize!($($items)*);
+    } ;
+
+    ($(#[$meta:meta])* $vis:vis struct $name:ident ( $($item:tt)+ ); $($items:tt)*) => {
+
+        $(#[$meta])*
+        #[derive(Serialize)]
+        #[serde(remote="Self")]
+        $vis struct $name ( $($item)+ );
+
+        derive_serialize!(@impl $name);
+
+        derive_serialize!($($items)*);
+    } ;
+
+
+    (@impl $name:ident) => {
+        impl serde::Serialize for $name {
+            #[instrument(level = "debug", skip(serializer))]
+            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<<S as serde::Serializer>::Ok, <S as serde::Serializer>::Error> {
+                $name::serialize(self, serializer)
+            }
+        }
+    } ;
+
+    () => {}
+}
 
 pub mod abi;
 #[macro_use]
@@ -79,12 +131,14 @@ pub type TraitDecls = Vec<TraitDef>;
 /// A list of impl trait decls.
 pub type ImplTraitDecls = Vec<ImplDef>;
 
+derive_serialize! {
 /// Holds information about a crate.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize)]
+#[derive(Clone, PartialEq, Eq, Debug)]
 pub struct Crate {
     pub id: CrateNum,
     pub name: Symbol,
     pub is_local: bool,
+}
 }
 
 impl Crate {
@@ -104,18 +158,22 @@ impl Crate {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, Serialize)]
+derive_serialize! {
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum ItemKind {
     Fn,
     Static,
     Const,
     Ctor(CtorKind),
 }
+}
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash, Serialize)]
+derive_serialize! {
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
 pub enum CtorKind {
     Const,
     Fn,
+}
 }
 
 pub type Filename = String;
@@ -196,11 +254,11 @@ pub fn all_trait_impls() -> ImplTraitDecls {
 pub struct Opaque(String);
 
 impl Serialize for Opaque {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
         serializer.serialize_str(&self.0)
     }
 }

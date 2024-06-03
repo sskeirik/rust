@@ -10,8 +10,9 @@ use std::fmt::{self, Debug};
 use std::num::NonZero;
 use std::ops::RangeInclusive;
 
+derive_serialize! {
 /// A function ABI definition.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FnAbi {
     /// The types of each argument.
     pub args: Vec<ArgAbi>,
@@ -32,7 +33,7 @@ pub struct FnAbi {
 }
 
 /// Information about the ABI of a function's argument, or return value.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct ArgAbi {
     pub ty: Ty,
     pub layout: Layout,
@@ -40,7 +41,7 @@ pub struct ArgAbi {
 }
 
 /// How a function argument should be passed in to the target function.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum PassMode {
     /// Ignore the argument.
     ///
@@ -61,14 +62,14 @@ pub enum PassMode {
 }
 
 /// The layout of a type, alongside the type itself.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TyAndLayout {
     pub ty: Ty,
     pub layout: Layout,
 }
 
 /// The layout of a type in memory.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct LayoutShape {
     /// The fields location withing the layout
     pub fields: FieldsShape,
@@ -89,6 +90,7 @@ pub struct LayoutShape {
 
     /// The size of this layout in bytes.
     pub size: Size,
+}
 }
 
 impl LayoutShape {
@@ -113,11 +115,11 @@ impl LayoutShape {
 pub struct Layout(usize);
 
 impl Serialize for Layout {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("Layout", &self.shape())
     }
 }
@@ -137,8 +139,9 @@ impl IndexedVal for Layout {
     }
 }
 
+derive_serialize! {
 /// Describes how the fields of a type are shaped in memory.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum FieldsShape {
     /// Scalar primitives and `!`, which never have fields.
     Primitive,
@@ -164,6 +167,7 @@ pub enum FieldsShape {
         offsets: Vec<Size>,
     },
 }
+}
 
 impl FieldsShape {
     pub fn fields_by_offset_order(&self) -> Vec<FieldIdx> {
@@ -188,7 +192,8 @@ impl FieldsShape {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+derive_serialize! {
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum VariantsShape {
     /// Single enum variants, structs/tuples, unions, and all non-ADTs.
     Single { index: VariantIdx },
@@ -207,7 +212,7 @@ pub enum VariantsShape {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum TagEncoding {
     /// The tag directly stores the discriminant, but possibly with a smaller layout
     /// (so converting the tag to the discriminant can require sign extension).
@@ -232,7 +237,7 @@ pub enum TagEncoding {
 
 /// Describes how values of the type are passed by target ABIs,
 /// in terms of categories of C types there are ABI rules for.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ValueAbi {
     Uninhabited,
     Scalar(Scalar),
@@ -245,6 +250,7 @@ pub enum ValueAbi {
         /// If true, the size is exact, otherwise it's only a lower bound.
         sized: bool,
     },
+}
 }
 
 impl ValueAbi {
@@ -260,8 +266,9 @@ impl ValueAbi {
     }
 }
 
+derive_serialize! {
 /// Information about one scalar component of a Rust type.
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum Scalar {
     Initialized {
         /// The primitive type used to represent this value.
@@ -278,6 +285,7 @@ pub enum Scalar {
         value: Primitive,
     },
 }
+}
 
 impl Scalar {
     pub fn has_niche(&self, target: &MachineInfo) -> bool {
@@ -290,8 +298,9 @@ impl Scalar {
     }
 }
 
+derive_serialize! {
 /// Fundamental unit of memory access and layout.
-#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Primitive {
     /// The `bool` is the signedness of the `Integer` type.
     ///
@@ -309,6 +318,7 @@ pub enum Primitive {
     },
     Pointer(AddressSpace),
 }
+}
 
 impl Primitive {
     pub fn size(self, target: &MachineInfo) -> Size {
@@ -320,8 +330,9 @@ impl Primitive {
     }
 }
 
+derive_serialize! {
 /// Enum representing the existing integer lengths.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum IntegerLength {
     I8,
     I16,
@@ -331,12 +342,13 @@ pub enum IntegerLength {
 }
 
 /// Enum representing the existing float lengths.
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug)]
 pub enum FloatLength {
     F16,
     F32,
     F64,
     F128,
+}
 }
 
 impl IntegerLength {
@@ -362,17 +374,20 @@ impl FloatLength {
     }
 }
 
+derive_serialize! {
 /// An identifier that specifies the address space that some operation
 /// should operate on. Special address spaces have an effect on code generation,
 /// depending on the target and the address spaces it implements.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct AddressSpace(pub u32);
+}
 
 impl AddressSpace {
     /// The default address space, corresponding to data space.
     pub const DATA: Self = AddressSpace(0);
 }
 
+derive_serialize! {
 /// Inclusive wrap-around range of valid values (bitwise representation), that is, if
 /// start > end, it represents `start..=MAX`, followed by `0..=end`.
 ///
@@ -380,10 +395,11 @@ impl AddressSpace {
 /// sequence:
 ///
 ///    254 (-2), 255 (-1), 0, 1, 2
-#[derive(Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct WrappingRange {
     pub start: u128,
     pub end: u128,
+}
 }
 
 impl WrappingRange {
@@ -430,8 +446,9 @@ impl Debug for WrappingRange {
     }
 }
 
+derive_serialize! {
 /// General language calling conventions.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub enum CallConvention {
     C,
     Rust,
@@ -461,4 +478,5 @@ pub enum CallConvention {
     AvrNonBlockingInterrupt,
 
     RiscvInterrupt,
+}
 }

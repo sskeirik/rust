@@ -6,9 +6,10 @@ use crate::{with, Error};
 use serde::{Serialize, Serializer};
 use std::io::Read;
 
+derive_serialize! {
 /// An allocation in the SMIR global memory can be either a function pointer,
 /// a static, or a "real" allocation with some data in it.
-#[derive(Debug, Clone, Eq, PartialEq, Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub enum GlobalAlloc {
     /// The alloc ID is used as a function pointer.
     Function(Instance),
@@ -21,6 +22,7 @@ pub enum GlobalAlloc {
     Static(StaticDef),
     /// The alloc ID points to memory.
     Memory(Allocation),
+}
 }
 
 impl From<AllocId> for GlobalAlloc {
@@ -46,11 +48,11 @@ impl GlobalAlloc {
 pub struct AllocId(usize);
 
 impl Serialize for AllocId {
+    #[instrument(level = "debug", skip(serializer))]
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        println!("Serialize: {:?}", self);
         serializer.serialize_newtype_struct("AllocId", &GlobalAlloc::from(*self))
     }
 }
