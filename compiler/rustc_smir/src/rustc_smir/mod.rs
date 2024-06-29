@@ -9,6 +9,7 @@
 
 use std::ops::RangeInclusive;
 
+use rustc_data_structures::fx;
 use rustc_hir::def::DefKind;
 use rustc_middle::mir;
 use rustc_middle::mir::interpret::AllocId;
@@ -37,6 +38,8 @@ pub struct Tables<'tcx> {
     pub(crate) ty_consts: IndexMap<ty::Const<'tcx>, TyConstId>,
     pub(crate) mir_consts: IndexMap<mir::Const<'tcx>, MirConstId>,
     pub(crate) layouts: IndexMap<rustc_abi::Layout<'tcx>, Layout>,
+    pub(crate) visited_tys: fx::FxHashSet<stable_mir::ty::Ty>,
+    pub(crate) visited_alloc_ids: fx::FxHashSet<stable_mir::mir::alloc::AllocId>,
 }
 
 impl<'tcx> Tables<'tcx> {

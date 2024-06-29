@@ -8,6 +8,8 @@ use crate::mir::mono::{Instance, StaticDef};
 use crate::target::{Endian, MachineInfo};
 use crate::ty::{Allocation, Binder, ExistentialTraitRef, IndexedVal, Ty};
 use crate::{Error, with};
+use serde::{Serialize, Serializer};
+use std::io::Read;
 
 /// An allocation in the SMIR global memory can be either a function pointer,
 /// a static, or a "real" allocation with some data in it.
@@ -44,8 +46,18 @@ impl GlobalAlloc {
 }
 
 /// A unique identification number for each provenance
-#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, Serialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Hash, PartialOrd, Ord)]
 pub struct AllocId(usize);
+
+impl Serialize for AllocId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        with(|cx| cx.add_visited_alloc_id(*self));
+        serializer.serialize_newtype_struct("AllocId", &self.0)
+    }
+}
 
 impl IndexedVal for AllocId {
     fn to_val(index: usize) -> Self {
