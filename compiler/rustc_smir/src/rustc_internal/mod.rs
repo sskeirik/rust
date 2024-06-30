@@ -9,7 +9,7 @@ use std::hash::Hash;
 use std::ops::Index;
 
 use rustc_data_structures::fx;
-use rustc_data_structures::fx::{FxIndexMap, FxHashSet};
+use rustc_data_structures::fx::{FxHashSet, FxIndexMap};
 use rustc_middle::mir::interpret::AllocId;
 use rustc_middle::ty;
 use rustc_middle::ty::TyCtxt;

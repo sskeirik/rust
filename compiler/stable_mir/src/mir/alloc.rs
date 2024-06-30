@@ -55,7 +55,7 @@ impl Serialize for AllocId {
     where
         S: Serializer,
     {
-        with(|cx| add_visited_allocs(cx,*self));
+        with(|cx| add_visited_allocs(cx, *self));
         serializer.serialize_newtype_struct("AllocId", &self.0)
     }
 }
@@ -63,10 +63,9 @@ impl Serialize for AllocId {
 fn add_visited_allocs(cx: &dyn Context, val: AllocId) {
     if cx.add_visited_alloc_id(val) {
         if let GlobalAlloc::Memory(alloc) = GlobalAlloc::from(val) {
-            alloc.provenance
-                .ptrs
-                .into_iter()
-                .for_each(|(_, prov)| { add_visited_allocs(cx, prov.0); })
+            alloc.provenance.ptrs.into_iter().for_each(|(_, prov)| {
+                add_visited_allocs(cx, prov.0);
+            })
         }
     }
 }
