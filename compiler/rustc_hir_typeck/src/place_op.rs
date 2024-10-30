@@ -1,16 +1,19 @@
-use crate::method::MethodCallee;
-use crate::{FnCtxt, PlaceOp};
-use rustc_ast as ast;
 use rustc_errors::Applicability;
-use rustc_hir as hir;
 use rustc_hir_analysis::autoderef::Autoderef;
 use rustc_infer::infer::InferOk;
 use rustc_middle::span_bug;
-use rustc_middle::ty::adjustment::{Adjust, Adjustment, OverloadedDeref, PointerCoercion};
-use rustc_middle::ty::adjustment::{AllowTwoPhase, AutoBorrow, AutoBorrowMutability};
+use rustc_middle::ty::adjustment::{
+    Adjust, Adjustment, AllowTwoPhase, AutoBorrow, AutoBorrowMutability, OverloadedDeref,
+    PointerCoercion,
+};
 use rustc_middle::ty::{self, Ty};
-use rustc_span::symbol::{sym, Ident};
 use rustc_span::Span;
+use rustc_span::symbol::{Ident, sym};
+use tracing::debug;
+use {rustc_ast as ast, rustc_hir as hir};
+
+use crate::method::MethodCallee;
+use crate::{FnCtxt, PlaceOp};
 
 impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     /// Type-check `*oprnd_expr` with `oprnd_expr` type-checked already.
@@ -27,13 +30,10 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         let ok = self.try_overloaded_deref(expr.span, oprnd_ty)?;
         let method = self.register_infer_ok_obligations(ok);
         if let ty::Ref(region, _, hir::Mutability::Not) = method.sig.inputs()[0].kind() {
-            self.apply_adjustments(
-                oprnd_expr,
-                vec![Adjustment {
-                    kind: Adjust::Borrow(AutoBorrow::Ref(*region, AutoBorrowMutability::Not)),
-                    target: method.sig.inputs()[0],
-                }],
-            );
+            self.apply_adjustments(oprnd_expr, vec![Adjustment {
+                kind: Adjust::Borrow(AutoBorrow::Ref(*region, AutoBorrowMutability::Not)),
+                target: method.sig.inputs()[0],
+            }]);
         } else {
             span_bug!(expr.span, "input to deref is not a ref?");
         }
@@ -149,7 +149,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             // If some lookup succeeded, install method in table
             let input_ty = self.next_ty_var(base_expr.span);
             let method =
-                self.try_overloaded_place_op(expr.span, self_ty, &[input_ty], PlaceOp::Index);
+                self.try_overloaded_place_op(expr.span, self_ty, Some(input_ty), PlaceOp::Index);
 
             if let Some(result) = method {
                 debug!("try_index_step: success, using overloaded indexing");
@@ -189,7 +189,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         &self,
         span: Span,
         base_ty: Ty<'tcx>,
-        arg_tys: &[Ty<'tcx>],
+        opt_rhs_ty: Option<Ty<'tcx>>,
         op: PlaceOp,
     ) -> Option<InferOk<'tcx, MethodCallee<'tcx>>> {
         debug!("try_overloaded_place_op({:?},{:?},{:?})", span, base_ty, op);
@@ -207,7 +207,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             Ident::with_dummy_span(imm_op),
             imm_tr,
             base_ty,
-            Some(arg_tys),
+            opt_rhs_ty,
         )
     }
 
@@ -215,7 +215,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
         &self,
         span: Span,
         base_ty: Ty<'tcx>,
-        arg_tys: &[Ty<'tcx>],
+        opt_rhs_ty: Option<Ty<'tcx>>,
         op: PlaceOp,
     ) -> Option<InferOk<'tcx, MethodCallee<'tcx>>> {
         debug!("try_mutable_overloaded_place_op({:?},{:?},{:?})", span, base_ty, op);
@@ -233,7 +233,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
             Ident::with_dummy_span(mut_op),
             mut_tr,
             base_ty,
-            Some(arg_tys),
+            opt_rhs_ty,
         )
     }
 
@@ -244,7 +244,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
     /// always know whether a place needs to be mutable or not in the first pass.
     /// This happens whether there is an implicit mutable reborrow, e.g. when the type
     /// is used as the receiver of a method call.
-    pub fn convert_place_derefs_to_mutable(&self, expr: &hir::Expr<'_>) {
+    pub(crate) fn convert_place_derefs_to_mutable(&self, expr: &hir::Expr<'_>) {
         // Gather up expressions we want to munge.
         let mut exprs = vec![expr];
 
@@ -284,7 +284,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                         && let Some(ok) = self.try_mutable_overloaded_place_op(
                             expr.span,
                             source,
-                            &[],
+                            None,
                             PlaceOp::Deref,
                         )
                     {
@@ -359,8 +359,7 @@ impl<'a, 'tcx> FnCtxt<'a, 'tcx> {
                 Some(self.typeck_results.borrow().node_args(expr.hir_id).type_at(1))
             }
         };
-        let arg_tys = arg_ty.as_slice();
-        let method = self.try_mutable_overloaded_place_op(expr.span, base_ty, arg_tys, op);
+        let method = self.try_mutable_overloaded_place_op(expr.span, base_ty, arg_ty, op);
         let method = match method {
             Some(ok) => self.register_infer_ok_obligations(ok),
             // Couldn't find the mutable variant of the place op, keep the

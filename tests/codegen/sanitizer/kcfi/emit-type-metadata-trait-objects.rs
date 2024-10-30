@@ -15,8 +15,9 @@
 trait Sized {}
 #[lang = "copy"]
 trait Copy {}
-#[lang = "receiver"]
-trait Receiver {}
+impl<T: ?Sized> Copy for &T {}
+#[lang = "legacy_receiver"]
+trait LegacyReceiver {}
 #[lang = "dispatch_from_dyn"]
 trait DispatchFromDyn<T> {}
 impl<'a, T: ?Sized + Unsize<U>, U: ?Sized> DispatchFromDyn<&'a U> for &'a T {}

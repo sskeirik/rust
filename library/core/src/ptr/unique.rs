@@ -1,6 +1,7 @@
 use crate::fmt;
 use crate::marker::{PhantomData, Unsize};
 use crate::ops::{CoerceUnsized, DispatchFromDyn};
+use crate::pin::PinCoerceUnsized;
 use crate::ptr::NonNull;
 
 /// A wrapper around a raw non-null `*mut T` that indicates that the possessor
@@ -91,6 +92,7 @@ impl<T: ?Sized> Unique<T> {
 
     /// Creates a new `Unique` if `ptr` is non-null.
     #[inline]
+    #[rustc_const_unstable(feature = "ptr_internals", issue = "none")]
     pub const fn new(ptr: *mut T) -> Option<Self> {
         if let Some(pointer) = NonNull::new(ptr) {
             Some(Unique { pointer, _marker: PhantomData })
@@ -165,6 +167,9 @@ impl<T: ?Sized, U: ?Sized> CoerceUnsized<Unique<U>> for Unique<T> where T: Unsiz
 
 #[unstable(feature = "ptr_internals", issue = "none")]
 impl<T: ?Sized, U: ?Sized> DispatchFromDyn<Unique<U>> for Unique<T> where T: Unsize<U> {}
+
+#[unstable(feature = "pin_coerce_unsized_trait", issue = "123430")]
+unsafe impl<T: ?Sized> PinCoerceUnsized for Unique<T> {}
 
 #[unstable(feature = "ptr_internals", issue = "none")]
 impl<T: ?Sized> fmt::Debug for Unique<T> {

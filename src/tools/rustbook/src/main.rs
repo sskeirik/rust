@@ -1,13 +1,11 @@
-use clap::crate_version;
-
 use std::env;
 use std::path::{Path, PathBuf};
 
-use clap::{arg, ArgMatches, Command};
-
-use mdbook::errors::Result as Result3;
+use clap::{ArgMatches, Command, arg, crate_version};
 use mdbook::MDBook;
-
+use mdbook::errors::Result as Result3;
+use mdbook_i18n_helpers::preprocessors::Gettext;
+use mdbook_spec::Spec;
 use mdbook_trpl_listing::TrplListing;
 use mdbook_trpl_note::TrplNote;
 
@@ -16,6 +14,16 @@ fn main() {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("warn")).init();
     let d_arg = arg!(-d --"dest-dir" <DEST_DIR>
 "The output directory for your book\n(Defaults to ./book when omitted)")
+    .required(false)
+    .value_parser(clap::value_parser!(PathBuf));
+
+    let l_arg = arg!(-l --"lang" <LANGUAGE>
+"The output language")
+    .required(false)
+    .value_parser(clap::value_parser!(String));
+
+    let root_arg = arg!(--"rust-root" <ROOT_DIR>
+"Path to the root of the rust source tree")
     .required(false)
     .value_parser(clap::value_parser!(PathBuf));
 
@@ -33,6 +41,8 @@ fn main() {
             Command::new("build")
                 .about("Build the book from the markdown files")
                 .arg(d_arg)
+                .arg(l_arg)
+                .arg(root_arg)
                 .arg(&dir_arg),
         )
         .subcommand(
@@ -63,6 +73,12 @@ pub fn build(args: &ArgMatches) -> Result3<()> {
     let book_dir = get_book_dir(args);
     let mut book = load_book(&book_dir)?;
 
+    if let Some(lang) = args.get_one::<String>("lang") {
+        let gettext = Gettext;
+        book.with_preprocessor(gettext);
+        book.config.set("book.language", lang).unwrap();
+    }
+
     // Set this to allow us to catch bugs in advance.
     book.config.build.create_missing = false;
 
@@ -70,12 +86,24 @@ pub fn build(args: &ArgMatches) -> Result3<()> {
         book.config.build.build_dir = dest_dir.into();
     }
 
+    // NOTE: Replacing preprocessors using this technique causes error
+    // messages to be displayed when the original preprocessor doesn't work
+    // (but it otherwise succeeds).
+    //
+    // This should probably be fixed in mdbook to remove the existing
+    // preprocessor, or this should modify the config and use
+    // MDBook::load_with_config.
     if book.config.get_preprocessor("trpl-note").is_some() {
         book.with_preprocessor(TrplNote);
     }
 
     if book.config.get_preprocessor("trpl-listing").is_some() {
         book.with_preprocessor(TrplListing);
+    }
+
+    if book.config.get_preprocessor("spec").is_some() {
+        let rust_root = args.get_one::<PathBuf>("rust-root").cloned();
+        book.with_preprocessor(Spec::new(rust_root)?);
     }
 
     book.build()?;

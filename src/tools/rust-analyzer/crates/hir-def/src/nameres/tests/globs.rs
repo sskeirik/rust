@@ -367,3 +367,87 @@ use event::Event;
         "#]],
     );
 }
+
+#[test]
+fn glob_may_override_visibility() {
+    check(
+        r#"
+mod reexport {
+    use crate::defs::*;
+    mod inner {
+        pub use crate::defs::{Trait, function, makro};
+    }
+    pub use inner::*;
+}
+mod defs {
+    pub trait Trait {}
+    pub fn function() {}
+    pub macro makro($t:item) { $t }
+}
+use reexport::*;
+"#,
+        expect![[r#"
+            crate
+            Trait: t
+            defs: t
+            function: v
+            makro: m
+            reexport: t
+
+            crate::defs
+            Trait: t
+            function: v
+            makro: m
+
+            crate::reexport
+            Trait: t
+            function: v
+            inner: t
+            makro: m
+
+            crate::reexport::inner
+            Trait: ti
+            function: vi
+            makro: mi
+        "#]],
+    );
+}
+
+#[test]
+fn regression_18308() {
+    check(
+        r#"
+use outer::*;
+
+mod outer {
+    mod inner_superglob {
+        pub use super::*;
+    }
+
+    // The importing order matters!
+    pub use inner_superglob::*;
+    use super::glob_target::*;
+}
+
+mod glob_target {
+    pub struct ShouldBePrivate;
+}
+"#,
+        expect![[r#"
+            crate
+            glob_target: t
+            outer: t
+
+            crate::glob_target
+            ShouldBePrivate: t v
+
+            crate::outer
+            ShouldBePrivate: t v
+            inner_superglob: t
+
+            crate::outer::inner_superglob
+            ShouldBePrivate: t v
+            inner_superglob: t
+        "#]],
+    );
+}

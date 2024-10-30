@@ -1,6 +1,5 @@
-use crate::io::prelude::*;
-
 use super::{Command, Output, Stdio};
+use crate::io::prelude::*;
 use crate::io::{BorrowedBuf, ErrorKind};
 use crate::mem::MaybeUninit;
 use crate::str;
@@ -97,9 +96,23 @@ fn stdout_works() {
 #[test]
 #[cfg_attr(any(windows, target_os = "vxworks"), ignore)]
 fn set_current_dir_works() {
+    // On many Unix platforms this will use the posix_spawn path.
     let mut cmd = shell_cmd();
     cmd.arg("-c").arg("pwd").current_dir("/").stdout(Stdio::piped());
     assert_eq!(run_output(cmd), "/\n");
+
+    // Also test the fork/exec path by setting a pre_exec function.
+    #[cfg(unix)]
+    {
+        use crate::os::unix::process::CommandExt;
+
+        let mut cmd = shell_cmd();
+        cmd.arg("-c").arg("pwd").current_dir("/").stdout(Stdio::piped());
+        unsafe {
+            cmd.pre_exec(|| Ok(()));
+        }
+        assert_eq!(run_output(cmd), "/\n");
+    }
 }
 
 #[test]
@@ -137,7 +150,7 @@ fn child_stdout_read_buf() {
     let child = cmd.spawn().unwrap();
 
     let mut stdout = child.stdout.unwrap();
-    let mut buf: [MaybeUninit<u8>; 128] = MaybeUninit::uninit_array();
+    let mut buf: [MaybeUninit<u8>; 128] = [MaybeUninit::uninit(); 128];
     let mut buf = BorrowedBuf::from(buf.as_mut_slice());
     stdout.read_buf(buf.unfilled()).unwrap();
 
@@ -385,29 +398,25 @@ fn test_interior_nul_in_env_value_is_error() {
 #[cfg(windows)]
 fn test_creation_flags() {
     use crate::os::windows::process::CommandExt;
-    use crate::sys::c::{BOOL, DWORD, INFINITE};
-    #[repr(C, packed)]
+    use crate::sys::c::{BOOL, INFINITE};
+    #[repr(C)]
     struct DEBUG_EVENT {
-        pub event_code: DWORD,
-        pub process_id: DWORD,
-        pub thread_id: DWORD,
+        pub event_code: u32,
+        pub process_id: u32,
+        pub thread_id: u32,
         // This is a union in the real struct, but we don't
         // need this data for the purposes of this test.
         pub _junk: [u8; 164],
     }
 
     extern "system" {
-        fn WaitForDebugEvent(lpDebugEvent: *mut DEBUG_EVENT, dwMilliseconds: DWORD) -> BOOL;
-        fn ContinueDebugEvent(
-            dwProcessId: DWORD,
-            dwThreadId: DWORD,
-            dwContinueStatus: DWORD,
-        ) -> BOOL;
+        fn WaitForDebugEvent(lpDebugEvent: *mut DEBUG_EVENT, dwMilliseconds: u32) -> BOOL;
+        fn ContinueDebugEvent(dwProcessId: u32, dwThreadId: u32, dwContinueStatus: u32) -> BOOL;
     }
 
-    const DEBUG_PROCESS: DWORD = 1;
-    const EXIT_PROCESS_DEBUG_EVENT: DWORD = 5;
-    const DBG_EXCEPTION_NOT_HANDLED: DWORD = 0x80010001;
+    const DEBUG_PROCESS: u32 = 1;
+    const EXIT_PROCESS_DEBUG_EVENT: u32 = 5;
+    const DBG_EXCEPTION_NOT_HANDLED: u32 = 0x80010001;
 
     let mut child =
         Command::new("cmd").creation_flags(DEBUG_PROCESS).stdin(Stdio::piped()).spawn().unwrap();
@@ -442,7 +451,7 @@ fn test_proc_thread_attributes() {
     use crate::mem;
     use crate::os::windows::io::AsRawHandle;
     use crate::os::windows::process::CommandExt;
-    use crate::sys::c::{CloseHandle, BOOL, HANDLE};
+    use crate::sys::c::{BOOL, CloseHandle, HANDLE};
     use crate::sys::cvt;
 
     #[repr(C)]

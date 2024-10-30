@@ -1,4 +1,4 @@
-//@ compile-flags: -O --target=avr-unknown-gnu-atmega328 --crate-type=rlib
+//@ compile-flags: -O --target=avr-unknown-gnu-atmega328 --crate-type=rlib -C panic=abort
 //@ needs-llvm-components: avr
 
 // This test validates that function pointers can be stored in global variables
@@ -17,8 +17,9 @@
 pub trait Sized {}
 #[lang = "copy"]
 pub trait Copy {}
-#[lang = "receiver"]
-pub trait Receiver {}
+impl<T: ?Sized> Copy for *const T {}
+#[lang = "legacy_receiver"]
+pub trait LegacyReceiver {}
 #[lang = "tuple_trait"]
 pub trait Tuple {}
 

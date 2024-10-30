@@ -1,19 +1,20 @@
-use super::{ErrorHandled, EvalToConstValueResult, EvalToValTreeResult, GlobalId};
-
-use crate::mir;
-use crate::query::TyCtxtEnsure;
-use crate::ty::visit::TypeVisitableExt;
-use crate::ty::GenericArgs;
-use crate::ty::{self, TyCtxt};
 use rustc_hir::def::DefKind;
 use rustc_hir::def_id::DefId;
 use rustc_session::lint;
-use rustc_span::{Span, DUMMY_SP};
+use rustc_span::{DUMMY_SP, Span};
 use tracing::{debug, instrument};
+
+use super::{
+    ErrorHandled, EvalToAllocationRawResult, EvalToConstValueResult, EvalToValTreeResult, GlobalId,
+};
+use crate::mir;
+use crate::query::TyCtxtEnsure;
+use crate::ty::visit::TypeVisitableExt;
+use crate::ty::{self, GenericArgs, TyCtxt};
 
 impl<'tcx> TyCtxt<'tcx> {
     /// Evaluates a constant without providing any generic parameters. This is useful to evaluate consts
-    /// that can't take any generic arguments like statics, const items or enum discriminants. If a
+    /// that can't take any generic arguments like const items or enum discriminants. If a
     /// generic parameter is used within the constant `ErrorHandled::ToGeneric` will be returned.
     #[instrument(skip(self), level = "debug")]
     pub fn const_eval_poly(self, def_id: DefId) -> EvalToConstValueResult<'tcx> {
@@ -27,6 +28,24 @@ impl<'tcx> TyCtxt<'tcx> {
         let param_env = self.param_env(def_id).with_reveal_all_normalized(self);
         self.const_eval_global_id(param_env, cid, DUMMY_SP)
     }
+
+    /// Evaluates a constant without providing any generic parameters. This is useful to evaluate consts
+    /// that can't take any generic arguments like const items or enum discriminants. If a
+    /// generic parameter is used within the constant `ErrorHandled::ToGeneric` will be returned.
+    #[instrument(skip(self), level = "debug")]
+    pub fn const_eval_poly_to_alloc(self, def_id: DefId) -> EvalToAllocationRawResult<'tcx> {
+        // In some situations def_id will have generic parameters within scope, but they aren't allowed
+        // to be used. So we can't use `Instance::mono`, instead we feed unresolved generic parameters
+        // into `const_eval` which will return `ErrorHandled::ToGeneric` if any of them are
+        // encountered.
+        let args = GenericArgs::identity_for_item(self, def_id);
+        let instance = ty::Instance::new(def_id, args);
+        let cid = GlobalId { instance, promoted: None };
+        let param_env = self.param_env(def_id).with_reveal_all_normalized(self);
+        let inputs = self.erase_regions(param_env.and(cid));
+        self.eval_to_allocation_raw(inputs)
+    }
+
     /// Resolves and evaluates a constant.
     ///
     /// The constant can be located on a trait like `<A as B>::C`, in which case the given
@@ -53,7 +72,7 @@ impl<'tcx> TyCtxt<'tcx> {
             bug!("did not expect inference variables here");
         }
 
-        match ty::Instance::resolve(
+        match ty::Instance::try_resolve(
             self, param_env,
             // FIXME: maybe have a separate version for resolving mir::UnevaluatedConst?
             ct.def, ct.args,
@@ -86,7 +105,7 @@ impl<'tcx> TyCtxt<'tcx> {
             bug!("did not expect inference variables here");
         }
 
-        match ty::Instance::resolve(self, param_env, ct.def, ct.args) {
+        match ty::Instance::try_resolve(self, param_env, ct.def, ct.args) {
             Ok(Some(instance)) => {
                 let cid = GlobalId { instance, promoted: None };
                 self.const_eval_global_id_for_typeck(param_env, cid, span).inspect(|_| {
@@ -97,7 +116,7 @@ impl<'tcx> TyCtxt<'tcx> {
                     // @lcnr believes that successfully evaluating even though there are
                     // used generic parameters is a bug of evaluation, so checking for it
                     // here does feel somewhat sensible.
-                    if !self.features().generic_const_exprs && ct.args.has_non_region_param() {
+                    if !self.features().generic_const_exprs() && ct.args.has_non_region_param() {
                         let def_kind = self.def_kind(instance.def_id());
                         assert!(
                             matches!(
@@ -177,7 +196,7 @@ impl<'tcx> TyCtxt<'tcx> {
 
 impl<'tcx> TyCtxtEnsure<'tcx> {
     /// Evaluates a constant without providing any generic parameters. This is useful to evaluate consts
-    /// that can't take any generic arguments like statics, const items or enum discriminants. If a
+    /// that can't take any generic arguments like const items or enum discriminants. If a
     /// generic parameter is used within the constant `ErrorHandled::ToGeneric` will be returned.
     #[instrument(skip(self), level = "debug")]
     pub fn const_eval_poly(self, def_id: DefId) {

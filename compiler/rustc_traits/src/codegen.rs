@@ -6,8 +6,8 @@
 use rustc_infer::infer::TyCtxtInferExt;
 use rustc_middle::bug;
 use rustc_middle::traits::CodegenObligationError;
-use rustc_middle::ty::{self, TyCtxt, TypeVisitableExt};
-use rustc_trait_selection::traits::error_reporting::TypeErrCtxtExt;
+use rustc_middle::ty::{self, TyCtxt, TypeVisitableExt, TypingMode};
+use rustc_trait_selection::error_reporting::InferCtxtErrorExt;
 use rustc_trait_selection::traits::{
     ImplSource, Obligation, ObligationCause, ObligationCtxt, ScrubbedTraitError, SelectionContext,
     Unimplemented,
@@ -21,7 +21,7 @@ use tracing::debug;
 /// obligations *could be* resolved if we wanted to.
 ///
 /// This also expects that `trait_ref` is fully normalized.
-pub fn codegen_select_candidate<'tcx>(
+pub(crate) fn codegen_select_candidate<'tcx>(
     tcx: TyCtxt<'tcx>,
     (param_env, trait_ref): (ty::ParamEnv<'tcx>, ty::TraitRef<'tcx>),
 ) -> Result<&'tcx ImplSource<'tcx, ()>, CodegenObligationError> {
@@ -30,7 +30,7 @@ pub fn codegen_select_candidate<'tcx>(
 
     // Do the initial selection for the obligation. This yields the
     // shallow result we are looking for -- that is, what specific impl.
-    let infcx = tcx.infer_ctxt().ignoring_regions().build();
+    let infcx = tcx.infer_ctxt().ignoring_regions().build(TypingMode::from_param_env(param_env));
     let mut selcx = SelectionContext::new(&infcx);
 
     let obligation_cause = ObligationCause::dummy();

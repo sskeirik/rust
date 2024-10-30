@@ -1,8 +1,8 @@
 use rustc_middle::ty::layout::LayoutOf;
 use rustc_target::spec::abi::Abi;
 
+use self::shims::windows::handle::{EvalContextExt as _, Handle, PseudoHandle};
 use crate::*;
-use shims::windows::handle::{EvalContextExt as _, Handle, PseudoHandle};
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 
@@ -10,12 +10,12 @@ impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
 pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn CreateThread(
         &mut self,
-        security_op: &OpTy<'tcx, Provenance>,
-        stacksize_op: &OpTy<'tcx, Provenance>,
-        start_op: &OpTy<'tcx, Provenance>,
-        arg_op: &OpTy<'tcx, Provenance>,
-        flags_op: &OpTy<'tcx, Provenance>,
-        thread_op: &OpTy<'tcx, Provenance>,
+        security_op: &OpTy<'tcx>,
+        stacksize_op: &OpTy<'tcx>,
+        start_op: &OpTy<'tcx>,
+        arg_op: &OpTy<'tcx>,
+        flags_op: &OpTy<'tcx>,
+        thread_op: &OpTy<'tcx>,
     ) -> InterpResult<'tcx, ThreadId> {
         let this = self.eval_context_mut();
 
@@ -57,8 +57,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
     fn WaitForSingleObject(
         &mut self,
-        handle_op: &OpTy<'tcx, Provenance>,
-        timeout_op: &OpTy<'tcx, Provenance>,
+        handle_op: &OpTy<'tcx>,
+        timeout_op: &OpTy<'tcx>,
     ) -> InterpResult<'tcx, u32> {
         let this = self.eval_context_mut();
 
@@ -79,6 +79,6 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
 
         this.join_thread(thread)?;
 
-        Ok(0)
+        interp_ok(0)
     }
 }

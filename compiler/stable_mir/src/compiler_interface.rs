@@ -6,19 +6,20 @@
 use std::cell::Cell;
 
 use crate::abi::{FnAbi, Layout, LayoutShape};
+use crate::crate_def::Attribute;
 use crate::mir::alloc::{AllocId, GlobalAlloc};
 use crate::mir::mono::{Instance, InstanceDef, StaticDef};
 use crate::mir::{BinOp, Body, Place, UnOp};
 use crate::target::MachineInfo;
 use crate::ty::{
-    AdtDef, AdtKind, Allocation, ClosureDef, ClosureKind, Const, FieldDef, FnDef, ForeignDef,
+    AdtDef, AdtKind, Allocation, ClosureDef, ClosureKind, FieldDef, FnDef, ForeignDef,
     ForeignItemKind, ForeignModule, ForeignModuleDef, GenericArgs, GenericPredicates, Generics,
-    ImplDef, ImplTrait, IntrinsicDef, LineInfo, PolyFnSig, RigidTy, Span, TraitDecl, TraitDef, Ty,
-    TyKind, UintTy, VariantDef,
+    ImplDef, ImplTrait, IntrinsicDef, LineInfo, MirConst, PolyFnSig, RigidTy, Span, TraitDecl,
+    TraitDef, Ty, TyConst, TyConstId, TyKind, UintTy, VariantDef,
 };
 use crate::{
-    mir, Crate, CrateItem, CrateItems, CrateNum, DefId, Error, Filename, ImplTraitDecls, ItemKind,
-    Symbol, TraitDecls,
+    Crate, CrateItem, CrateItems, CrateNum, DefId, Error, Filename, ImplTraitDecls, ItemKind,
+    Symbol, TraitDecls, mir,
 };
 
 /// This trait defines the interface between stable_mir and the Rust compiler.
@@ -54,6 +55,15 @@ pub trait Context {
 
     /// Returns the name of given `DefId`
     fn def_name(&self, def_id: DefId, trimmed: bool) -> Symbol;
+
+    /// Return attributes with the given attribute name.
+    ///
+    /// Single segmented name like `#[inline]` is specified as `&["inline".to_string()]`.
+    /// Multi-segmented name like `#[rustfmt::skip]` is specified as `&["rustfmt".to_string(), "skip".to_string()]`.
+    fn get_attrs_by_path(&self, def_id: DefId, attr: &[Symbol]) -> Vec<Attribute>;
+
+    /// Get all attributes of a definition.
+    fn get_all_attrs(&self, def_id: DefId) -> Vec<Attribute>;
 
     /// Returns printable, human readable form of `Span`
     fn span_to_string(&self, span: Span) -> String;
@@ -94,10 +104,6 @@ pub trait Context {
     /// Retrieve the plain function name of an intrinsic.
     fn intrinsic_name(&self, def: IntrinsicDef) -> Symbol;
 
-    /// Returns whether the intrinsic has no meaningful body and all backends
-    /// need to shim all calls to it.
-    fn intrinsic_must_be_overridden(&self, def: IntrinsicDef) -> bool;
-
     /// Retrieve the closure signature for the given generic arguments.
     fn closure_sig(&self, args: &GenericArgs) -> PolyFnSig;
 
@@ -109,19 +115,21 @@ pub trait Context {
     fn variant_fields(&self, def: VariantDef) -> Vec<FieldDef>;
 
     /// Evaluate constant as a target usize.
-    fn eval_target_usize(&self, cnst: &Const) -> Result<u64, Error>;
+    fn eval_target_usize(&self, cnst: &MirConst) -> Result<u64, Error>;
+    fn eval_target_usize_ty(&self, cnst: &TyConst) -> Result<u64, Error>;
 
     /// Create a new zero-sized constant.
-    fn try_new_const_zst(&self, ty: Ty) -> Result<Const, Error>;
+    fn try_new_const_zst(&self, ty: Ty) -> Result<MirConst, Error>;
 
     /// Create a new constant that represents the given string value.
-    fn new_const_str(&self, value: &str) -> Const;
+    fn new_const_str(&self, value: &str) -> MirConst;
 
     /// Create a new constant that represents the given boolean value.
-    fn new_const_bool(&self, value: bool) -> Const;
+    fn new_const_bool(&self, value: bool) -> MirConst;
 
     /// Create a new constant that represents the given value.
-    fn try_new_const_uint(&self, value: u128, uint_ty: UintTy) -> Result<Const, Error>;
+    fn try_new_const_uint(&self, value: u128, uint_ty: UintTy) -> Result<MirConst, Error>;
+    fn try_new_ty_const_uint(&self, value: u128, uint_ty: UintTy) -> Result<TyConst, Error>;
 
     /// Create a new type from the given kind.
     fn new_rigid_ty(&self, kind: RigidTy) -> Ty;
@@ -136,10 +144,12 @@ pub trait Context {
     fn def_ty_with_args(&self, item: DefId, args: &GenericArgs) -> Ty;
 
     /// Returns literal value of a const as a string.
-    fn const_pretty(&self, cnst: &Const) -> String;
+    fn mir_const_pretty(&self, cnst: &MirConst) -> String;
 
     /// `Span` of an item
     fn span_of_an_item(&self, def_id: DefId) -> Span;
+
+    fn ty_const_pretty(&self, ct: TyConstId) -> String;
 
     /// Obtain the representation of a type.
     fn ty_pretty(&self, ty: Ty) -> String;
@@ -215,6 +225,9 @@ pub trait Context {
     /// Get an instance ABI.
     fn instance_abi(&self, def: InstanceDef) -> Result<FnAbi, Error>;
 
+    /// Get the ABI of a function pointer.
+    fn fn_ptr_abi(&self, fn_ptr: PolyFnSig) -> Result<FnAbi, Error>;
+
     /// Get the layout of a type.
     fn ty_layout(&self, ty: Ty) -> Result<Layout, Error>;
 
@@ -242,7 +255,7 @@ where
     if TLV.is_set() {
         Err(Error::from("StableMIR already running"))
     } else {
-        let ptr: *const () = std::ptr::addr_of!(context) as _;
+        let ptr: *const () = (&raw const context) as _;
         TLV.set(&Cell::new(ptr), || Ok(f()))
     }
 }

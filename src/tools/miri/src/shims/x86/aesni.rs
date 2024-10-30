@@ -1,20 +1,18 @@
-use rustc_middle::ty::layout::LayoutOf as _;
 use rustc_middle::ty::Ty;
+use rustc_middle::ty::layout::LayoutOf as _;
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
 use crate::*;
 
 impl<'tcx> EvalContextExt<'tcx> for crate::MiriInterpCx<'tcx> {}
-pub(super) trait EvalContextExt<'tcx>:
-    crate::MiriInterpCxExt<'tcx>
-{
+pub(super) trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
     fn emulate_x86_aesni_intrinsic(
         &mut self,
         link_name: Symbol,
         abi: Abi,
-        args: &[OpTy<'tcx, Provenance>],
-        dest: &MPlaceTy<'tcx, Provenance>,
+        args: &[OpTy<'tcx>],
+        dest: &MPlaceTy<'tcx>,
     ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
         this.expect_target_feature_for_intrinsic(link_name, "aes")?;
@@ -125,9 +123,9 @@ pub(super) trait EvalContextExt<'tcx>:
             }
             // TODO: Implement the `llvm.x86.aesni.aeskeygenassist` when possible
             // with an external crate.
-            _ => return Ok(EmulateItemResult::NotSupported),
+            _ => return interp_ok(EmulateItemResult::NotSupported),
         }
-        Ok(EmulateItemResult::NeedsReturn)
+        interp_ok(EmulateItemResult::NeedsReturn)
     }
 }
 
@@ -135,9 +133,9 @@ pub(super) trait EvalContextExt<'tcx>:
 // `state` with the corresponding 128-bit key of `key`.
 fn aes_round<'tcx>(
     this: &mut crate::MiriInterpCx<'tcx>,
-    state: &OpTy<'tcx, Provenance>,
-    key: &OpTy<'tcx, Provenance>,
-    dest: &MPlaceTy<'tcx, Provenance>,
+    state: &OpTy<'tcx>,
+    key: &OpTy<'tcx>,
+    dest: &MPlaceTy<'tcx>,
     f: impl Fn(u128, u128) -> u128,
 ) -> InterpResult<'tcx, ()> {
     assert_eq!(dest.layout.size, state.layout.size);
@@ -164,5 +162,5 @@ fn aes_round<'tcx>(
         this.write_scalar(Scalar::from_u128(res), &dest)?;
     }
 
-    Ok(())
+    interp_ok(())
 }

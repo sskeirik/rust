@@ -14,8 +14,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         &mut self,
         link_name: Symbol,
         abi: Abi,
-        args: &[OpTy<'tcx, Provenance>],
-        dest: &MPlaceTy<'tcx, Provenance>,
+        args: &[OpTy<'tcx>],
+        dest: &MPlaceTy<'tcx>,
     ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
         match link_name.as_str() {
@@ -29,16 +29,21 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                     this.read_scalar(thread)?,
                     this.read_scalar(name)?,
                     max_len,
+                    /* truncate */ false,
                 )?;
             }
             "pthread_get_name_np" => {
                 let [thread, name, len] =
                     this.check_shim(abi, Abi::C { unwind: false }, link_name, args)?;
-                // FreeBSD's pthread_get_name_np does not return anything.
+                // FreeBSD's pthread_get_name_np does not return anything
+                // and uses strlcpy, which truncates the resulting value,
+                // but always adds a null terminator (except for zero-sized buffers).
+                // https://github.com/freebsd/freebsd-src/blob/c2d93a803acef634bd0eede6673aeea59e90c277/lib/libthr/thread/thr_info.c#L119-L144
                 this.pthread_getname_np(
                     this.read_scalar(thread)?,
                     this.read_scalar(name)?,
                     this.read_scalar(len)?,
+                    /* truncate */ true,
                 )?;
             }
 
@@ -84,8 +89,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_null(dest)?;
             }
 
-            _ => return Ok(EmulateItemResult::NotSupported),
+            _ => return interp_ok(EmulateItemResult::NotSupported),
         }
-        Ok(EmulateItemResult::NeedsReturn)
+        interp_ok(EmulateItemResult::NeedsReturn)
     }
 }

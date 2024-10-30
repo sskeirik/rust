@@ -1,14 +1,15 @@
+use std::fmt;
+
+use derive_where::derive_where;
 #[cfg(feature = "nightly")]
 use rustc_macros::{Decodable, Encodable, HashStable_NoContext, TyDecodable, TyEncodable};
 use rustc_type_ir_macros::{TypeFoldable_Generic, TypeVisitable_Generic};
-use std::fmt;
 
 use crate::{self as ty, Interner};
 
 /// A clause is something that can appear in where bounds or be inferred
 /// by implied bounds.
-#[derive(derivative::Derivative)]
-#[derivative(Clone(bound = ""), Copy(bound = ""), Hash(bound = ""), Eq(bound = ""))]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub enum ClauseKind<I: Interner> {
@@ -36,39 +37,23 @@ pub enum ClauseKind<I: Interner> {
 
     /// Constant initializer must evaluate successfully.
     ConstEvaluatable(I::Const),
+
+    /// Enforces the constness of the predicate we're calling. Like a projection
+    /// goal from a where clause, it's always going to be paired with a
+    /// corresponding trait clause; this just enforces the *constness* of that
+    /// implementation.
+    HostEffect(ty::HostEffectPredicate<I>),
 }
 
-impl<I: Interner> PartialEq for ClauseKind<I> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Trait(l0), Self::Trait(r0)) => l0 == r0,
-            (Self::RegionOutlives(l0), Self::RegionOutlives(r0)) => l0 == r0,
-            (Self::TypeOutlives(l0), Self::TypeOutlives(r0)) => l0 == r0,
-            (Self::Projection(l0), Self::Projection(r0)) => l0 == r0,
-            (Self::ConstArgHasType(l0, l1), Self::ConstArgHasType(r0, r1)) => l0 == r0 && l1 == r1,
-            (Self::WellFormed(l0), Self::WellFormed(r0)) => l0 == r0,
-            (Self::ConstEvaluatable(l0), Self::ConstEvaluatable(r0)) => l0 == r0,
-            _ => false,
-        }
-    }
-}
-
-#[derive(derivative::Derivative)]
-#[derivative(
-    Clone(bound = ""),
-    Copy(bound = ""),
-    Hash(bound = ""),
-    PartialEq(bound = ""),
-    Eq(bound = "")
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq; I: Interner)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub enum PredicateKind<I: Interner> {
     /// Prove a clause
     Clause(ClauseKind<I>),
 
-    /// Trait must be object-safe.
-    ObjectSafe(I::DefId),
+    /// Trait must be dyn-compatible.
+    DynCompatible(I::DefId),
 
     /// `T1 <: T2`
     ///
@@ -95,13 +80,13 @@ pub enum PredicateKind<I: Interner> {
     Ambiguous,
 
     /// This should only be used inside of the new solver for `AliasRelate` and expects
-    /// the `term` to be an unconstrained inference variable.
+    /// the `term` to be always be an unconstrained inference variable. It is used to
+    /// normalize `alias` as much as possible. In case the alias is rigid - i.e. it cannot
+    /// be normalized in the current environment - this constrains `term` to be equal to
+    /// the alias itself.
     ///
-    /// The alias normalizes to `term`. Unlike `Projection`, this always fails if the
-    /// alias cannot be normalized in the current context. For the rigid alias
-    /// `T as Trait>::Assoc`, `Projection(<T as Trait>::Assoc, ?x)` constrains `?x`
-    /// to `<T as Trait>::Assoc` while `NormalizesTo(<T as Trait>::Assoc, ?x)`
-    /// results in `NoSolution`.
+    /// It is likely more useful to think of this as a function `normalizes_to(alias)`,
+    /// whose return value is written into `term`.
     NormalizesTo(ty::NormalizesTo<I>),
 
     /// Separate from `ClauseKind::Projection` which is used for normalization in new solver.
@@ -127,11 +112,11 @@ impl std::fmt::Display for AliasRelationDirection {
     }
 }
 
-// FIXME: Convert to DebugWithInfcx impl
 impl<I: Interner> fmt::Debug for ClauseKind<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ClauseKind::ConstArgHasType(ct, ty) => write!(f, "ConstArgHasType({ct:?}, {ty:?})"),
+            ClauseKind::HostEffect(data) => data.fmt(f),
             ClauseKind::Trait(a) => a.fmt(f),
             ClauseKind::RegionOutlives(pair) => pair.fmt(f),
             ClauseKind::TypeOutlives(pair) => pair.fmt(f),
@@ -144,15 +129,14 @@ impl<I: Interner> fmt::Debug for ClauseKind<I> {
     }
 }
 
-// FIXME: Convert to DebugWithInfcx impl
 impl<I: Interner> fmt::Debug for PredicateKind<I> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             PredicateKind::Clause(a) => a.fmt(f),
             PredicateKind::Subtype(pair) => pair.fmt(f),
             PredicateKind::Coerce(pair) => pair.fmt(f),
-            PredicateKind::ObjectSafe(trait_def_id) => {
-                write!(f, "ObjectSafe({trait_def_id:?})")
+            PredicateKind::DynCompatible(trait_def_id) => {
+                write!(f, "DynCompatible({trait_def_id:?})")
             }
             PredicateKind::ConstEquate(c1, c2) => write!(f, "ConstEquate({c1:?}, {c2:?})"),
             PredicateKind::Ambiguous => write!(f, "Ambiguous"),

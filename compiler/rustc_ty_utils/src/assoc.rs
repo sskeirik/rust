@@ -143,6 +143,7 @@ fn associated_item_from_trait_item_ref(trait_item_ref: &hir::TraitItemRef) -> ty
         container: ty::TraitContainer,
         fn_has_self_parameter: has_self,
         opt_rpitit_info: None,
+        is_effects_desugaring: false,
     }
 }
 
@@ -162,6 +163,7 @@ fn associated_item_from_impl_item_ref(impl_item_ref: &hir::ImplItemRef) -> ty::A
         container: ty::ImplContainer,
         fn_has_self_parameter: has_self,
         opt_rpitit_info: None,
+        is_effects_desugaring: false,
     }
 }
 
@@ -182,19 +184,16 @@ fn associated_types_for_impl_traits_in_associated_fn(
 
     match tcx.def_kind(parent_def_id) {
         DefKind::Trait => {
-            struct RPITVisitor<'tcx> {
+            struct RPITVisitor {
                 rpits: FxIndexSet<LocalDefId>,
-                tcx: TyCtxt<'tcx>,
             }
 
-            impl<'tcx> Visitor<'tcx> for RPITVisitor<'tcx> {
+            impl<'tcx> Visitor<'tcx> for RPITVisitor {
                 fn visit_ty(&mut self, ty: &'tcx hir::Ty<'tcx>) {
-                    if let hir::TyKind::OpaqueDef(item_id, _, _) = ty.kind
-                        && self.rpits.insert(item_id.owner_id.def_id)
+                    if let hir::TyKind::OpaqueDef(opaq, _) = ty.kind
+                        && self.rpits.insert(opaq.def_id)
                     {
-                        let opaque_item =
-                            self.tcx.hir().expect_item(item_id.owner_id.def_id).expect_opaque_ty();
-                        for bound in opaque_item.bounds {
+                        for bound in opaq.bounds {
                             intravisit::walk_param_bound(self, bound);
                         }
                     }
@@ -202,7 +201,7 @@ fn associated_types_for_impl_traits_in_associated_fn(
                 }
             }
 
-            let mut visitor = RPITVisitor { tcx, rpits: FxIndexSet::default() };
+            let mut visitor = RPITVisitor { rpits: FxIndexSet::default() };
 
             if let Some(output) = tcx.hir().get_fn_output(fn_def_id) {
                 visitor.visit_fn_ret_ty(output);
@@ -245,7 +244,8 @@ fn associated_type_for_impl_trait_in_trait(
     tcx: TyCtxt<'_>,
     opaque_ty_def_id: LocalDefId,
 ) -> LocalDefId {
-    let (hir::OpaqueTyOrigin::FnReturn(fn_def_id) | hir::OpaqueTyOrigin::AsyncFn(fn_def_id)) =
+    let (hir::OpaqueTyOrigin::FnReturn { parent: fn_def_id, .. }
+    | hir::OpaqueTyOrigin::AsyncFn { parent: fn_def_id, .. }) =
         tcx.opaque_type_origin(opaque_ty_def_id)
     else {
         bug!("expected opaque for {opaque_ty_def_id:?}");
@@ -275,6 +275,7 @@ fn associated_type_for_impl_trait_in_trait(
             fn_def_id: fn_def_id.to_def_id(),
             opaque_def_id: opaque_ty_def_id.to_def_id(),
         }),
+        is_effects_desugaring: false,
     });
 
     // Copy visility of the containing function.
@@ -326,6 +327,7 @@ fn associated_type_for_impl_trait_in_impl(
         container: ty::ImplContainer,
         fn_has_self_parameter: false,
         opt_rpitit_info: Some(ImplTraitInTraitData::Impl { fn_def_id: impl_fn_def_id.to_def_id() }),
+        is_effects_desugaring: false,
     });
 
     // Copy visility of the containing function.
@@ -360,7 +362,6 @@ fn associated_type_for_impl_trait_in_impl(
             param_def_id_to_index,
             has_self: false,
             has_late_bound_regions: trait_assoc_generics.has_late_bound_regions,
-            host_effect_index: parent_generics.host_effect_index,
         }
     });
 

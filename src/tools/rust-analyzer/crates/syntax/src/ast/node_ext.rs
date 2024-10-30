@@ -10,11 +10,14 @@ use parser::SyntaxKind;
 use rowan::{GreenNodeData, GreenTokenData};
 
 use crate::{
-    ast::{self, support, AstNode, AstToken, HasAttrs, HasGenericParams, HasName, SyntaxNode},
+    ast::{
+        self, support, AstNode, AstToken, HasAttrs, HasGenericArgs, HasGenericParams, HasName,
+        SyntaxNode,
+    },
     ted, NodeOrToken, SmolStr, SyntaxElement, SyntaxToken, TokenText, T,
 };
 
-use super::{RangeItem, RangeOp};
+use super::{GenericParam, RangeItem, RangeOp};
 
 impl ast::Lifetime {
     pub fn text(&self) -> TokenText<'_> {
@@ -791,6 +794,8 @@ pub enum TypeBoundKind {
     PathType(ast::PathType),
     /// for<'a> ...
     ForType(ast::ForType),
+    /// use
+    Use(ast::UseBoundGenericArgs),
     /// 'a
     Lifetime(ast::Lifetime),
 }
@@ -801,6 +806,8 @@ impl ast::TypeBound {
             TypeBoundKind::PathType(path_type)
         } else if let Some(for_type) = support::children(self.syntax()).next() {
             TypeBoundKind::ForType(for_type)
+        } else if let Some(args) = self.use_bound_generic_args() {
+            TypeBoundKind::Use(args)
         } else if let Some(lifetime) = self.lifetime() {
             TypeBoundKind::Lifetime(lifetime)
         } else {
@@ -813,6 +820,15 @@ impl ast::TypeBound {
 pub enum TypeOrConstParam {
     Type(ast::TypeParam),
     Const(ast::ConstParam),
+}
+
+impl From<TypeOrConstParam> for GenericParam {
+    fn from(value: TypeOrConstParam) -> Self {
+        match value {
+            TypeOrConstParam::Type(it) => GenericParam::TypeParam(it),
+            TypeOrConstParam::Const(it) => GenericParam::ConstParam(it),
+        }
+    }
 }
 
 impl TypeOrConstParam {
@@ -1125,20 +1141,12 @@ impl From<ast::AssocItem> for ast::AnyHasAttrs {
     }
 }
 
-impl From<ast::Variant> for ast::AnyHasAttrs {
-    fn from(node: ast::Variant) -> Self {
-        Self::new(node)
-    }
-}
-
-impl From<ast::RecordField> for ast::AnyHasAttrs {
-    fn from(node: ast::RecordField) -> Self {
-        Self::new(node)
-    }
-}
-
-impl From<ast::TupleField> for ast::AnyHasAttrs {
-    fn from(node: ast::TupleField) -> Self {
-        Self::new(node)
+impl ast::OrPat {
+    pub fn leading_pipe(&self) -> Option<SyntaxToken> {
+        self.syntax
+            .children_with_tokens()
+            .find(|it| !it.kind().is_trivia())
+            .and_then(NodeOrToken::into_token)
+            .filter(|it| it.kind() == T![|])
     }
 }

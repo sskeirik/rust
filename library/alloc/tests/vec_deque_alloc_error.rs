@@ -1,13 +1,12 @@
 #![feature(alloc_error_hook, allocator_api)]
 
-use std::{
-    alloc::{set_alloc_error_hook, AllocError, Allocator, Layout, System},
-    collections::VecDeque,
-    panic::{catch_unwind, AssertUnwindSafe},
-    ptr::NonNull,
-};
+use std::alloc::{AllocError, Allocator, Layout, System, set_alloc_error_hook};
+use std::collections::VecDeque;
+use std::panic::{AssertUnwindSafe, catch_unwind};
+use std::ptr::NonNull;
 
 #[test]
+#[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
 fn test_shrink_to_unwind() {
     // This tests that `shrink_to` leaves the deque in a consistent state when
     // the call to `RawVec::shrink_to_fit` unwinds. The code is adapted from #123369

@@ -1,6 +1,7 @@
 use rustc_span::Symbol;
 use rustc_target::spec::abi::Abi;
 
+use crate::shims::unix::android::thread::prctl;
 use crate::*;
 
 pub fn is_dyn_sym(_name: &str) -> bool {
@@ -13,8 +14,8 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
         &mut self,
         link_name: Symbol,
         abi: Abi,
-        args: &[OpTy<'tcx, Provenance>],
-        dest: &MPlaceTy<'tcx, Provenance>,
+        args: &[OpTy<'tcx>],
+        dest: &MPlaceTy<'tcx>,
     ) -> InterpResult<'tcx, EmulateItemResult> {
         let this = self.eval_context_mut();
         match link_name.as_str() {
@@ -25,8 +26,11 @@ pub trait EvalContextExt<'tcx>: crate::MiriInterpCxExt<'tcx> {
                 this.write_scalar(errno_place.to_ref(this).to_scalar(), dest)?;
             }
 
-            _ => return Ok(EmulateItemResult::NotSupported),
+            // Threading
+            "prctl" => prctl(this, link_name, abi, args, dest)?,
+
+            _ => return interp_ok(EmulateItemResult::NotSupported),
         }
-        Ok(EmulateItemResult::NeedsReturn)
+        interp_ok(EmulateItemResult::NeedsReturn)
     }
 }

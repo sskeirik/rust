@@ -70,8 +70,8 @@ fn dist_client(
             &format!(r#""version": "{version}""#),
         )
         .replace(r#""releaseTag": null"#, &format!(r#""releaseTag": "{release_tag}""#))
-        .replace(r#""$generated-start": {},"#, "")
-        .replace(",\n                \"$generated-end\": {}", "")
+        .replace(r#""title": "$generated-start""#, "")
+        .replace(r#""title": "$generated-end""#, "")
         .replace(r#""enabledApiProposals": [],"#, r#""#);
     patch.commit(sh)?;
 
@@ -101,9 +101,10 @@ fn dist_server(
     cmd!(sh, "cargo build --manifest-path ./crates/rust-analyzer/Cargo.toml --bin rust-analyzer --target {target_name} {features...} --release").run()?;
 
     let dst = Path::new("dist").join(&target.artifact_name);
-    gzip(&target.server_path, &dst.with_extension("gz"))?;
     if target_name.contains("-windows-") {
         zip(&target.server_path, target.symbols_path.as_ref(), &dst.with_extension("zip"))?;
+    } else {
+        gzip(&target.server_path, &dst.with_extension("gz"))?;
     }
 
     Ok(())

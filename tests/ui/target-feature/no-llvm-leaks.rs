@@ -6,7 +6,7 @@
 //@ build-pass
 #![no_core]
 #![crate_type = "rlib"]
-#![feature(intrinsics, rustc_attrs, no_core, lang_items, staged_api, lint_reasons)]
+#![feature(intrinsics, rustc_attrs, no_core, lang_items, staged_api)]
 #![stable(feature = "test", since = "1.0.0")]
 
 // Supporting minimal rust core code
@@ -17,6 +17,7 @@ trait Copy {}
 impl Copy for bool {}
 
 extern "rust-intrinsic" {
+    #[stable(feature = "test", since = "1.0.0")]
     #[rustc_const_stable(feature = "test", since = "1.0.0")]
     fn unreachable() -> !;
 }

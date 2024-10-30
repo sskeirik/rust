@@ -1,7 +1,8 @@
+use std::panic::{AssertUnwindSafe, catch_unwind};
+
 use super::*;
 use crate::boxed::Box;
 use crate::testing::crash_test::{CrashTestDummy, Panic};
-use std::panic::{catch_unwind, AssertUnwindSafe};
 
 #[test]
 fn test_iterator() {
@@ -349,7 +350,7 @@ fn test_drain_forget() {
         mem::forget(it);
     }))
     .unwrap();
-    // Behaviour after leaking is explicitly unspecified and order is arbitrary,
+    // Behavior after leaking is explicitly unspecified and order is arbitrary,
     // so it's fine if these start failing, but probably worth knowing.
     assert!(q.is_empty());
     assert_eq!(a.dropped() + b.dropped() + c.dropped(), 1);
@@ -376,7 +377,7 @@ fn test_drain_sorted_forget() {
         mem::forget(it);
     }))
     .unwrap();
-    // Behaviour after leaking is explicitly unspecified,
+    // Behavior after leaking is explicitly unspecified,
     // so it's fine if these start failing, but probably worth knowing.
     assert_eq!(q.len(), 2);
     assert_eq!(a.dropped(), 0);
@@ -504,10 +505,11 @@ fn test_retain_catch_unwind() {
 #[cfg(not(target_os = "emscripten"))]
 #[cfg_attr(not(panic = "unwind"), ignore = "test requires unwinding support")]
 fn panic_safe() {
-    use rand::seq::SliceRandom;
     use std::cmp;
     use std::panic::{self, AssertUnwindSafe};
     use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use rand::seq::SliceRandom;
 
     static DROP_COUNTER: AtomicUsize = AtomicUsize::new(0);
 

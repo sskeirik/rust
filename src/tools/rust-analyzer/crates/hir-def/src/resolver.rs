@@ -2,17 +2,18 @@
 use std::{fmt, iter, mem};
 
 use base_db::CrateId;
-use hir_expand::{
-    name::{name, Name},
-    MacroDefId,
-};
-use intern::Interned;
+use hir_expand::{name::Name, MacroDefId};
+use intern::sym;
+use itertools::Itertools as _;
 use rustc_hash::FxHashSet;
 use smallvec::{smallvec, SmallVec};
 use triomphe::Arc;
 
 use crate::{
-    body::scope::{ExprScopes, ScopeId},
+    body::{
+        scope::{ExprScopes, ScopeId},
+        HygieneId,
+    },
     builtin_type::BuiltinType,
     data::ExternCrateDeclData,
     db::DefDatabase,
@@ -23,7 +24,7 @@ use crate::{
     nameres::{DefMap, MacroSubNs},
     path::{ModPath, Path, PathKind},
     per_ns::PerNs,
-    type_ref::LifetimeRef,
+    type_ref::{LifetimeRef, TypesMap},
     visibility::{RawVisibility, Visibility},
     AdtId, ConstId, ConstParamId, CrateRootModuleId, DefWithBodyId, EnumId, EnumVariantId,
     ExternBlockId, ExternCrateId, FunctionId, FxIndexMap, GenericDefId, GenericParamId, HasModule,
@@ -75,13 +76,15 @@ enum Scope {
     /// All the items and imported names of a module
     BlockScope(ModuleItemMap),
     /// Brings the generic parameters of an item into scope
-    GenericParams { def: GenericDefId, params: Interned<GenericParams> },
+    GenericParams { def: GenericDefId, params: Arc<GenericParams> },
     /// Brings `Self` in `impl` block into scope
     ImplDefScope(ImplId),
     /// Brings `Self` in enum, struct and union definitions into scope
     AdtScope(AdtId),
     /// Local bindings
     ExprScope(ExprScope),
+    /// Macro definition inside bodies that affects all paths after it in the same block.
+    MacroDefScope(Box<MacroDefId>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -164,7 +167,8 @@ impl Resolver {
         path: &Path,
     ) -> Option<(TypeNs, Option<usize>, Option<ImportOrExternCrate>)> {
         let path = match path {
-            Path::Normal { mod_path, .. } => mod_path,
+            Path::BarePath(mod_path) => mod_path,
+            Path::Normal(it) => it.mod_path(),
             Path::LangItem(l, seg) => {
                 let type_ns = match *l {
                     LangItemTarget::Union(it) => TypeNs::AdtId(it.into()),
@@ -190,19 +194,19 @@ impl Resolver {
 
         for scope in self.scopes() {
             match scope {
-                Scope::ExprScope(_) => continue,
+                Scope::ExprScope(_) | Scope::MacroDefScope(_) => continue,
                 Scope::GenericParams { params, def } => {
                     if let Some(id) = params.find_type_by_name(first_name, *def) {
                         return Some((TypeNs::GenericParam(id), remaining_idx(), None));
                     }
                 }
                 &Scope::ImplDefScope(impl_) => {
-                    if first_name == &name![Self] {
+                    if *first_name == sym::Self_.clone() {
                         return Some((TypeNs::SelfType(impl_), remaining_idx(), None));
                     }
                 }
                 &Scope::AdtScope(adt) => {
-                    if first_name == &name![Self] {
+                    if *first_name == sym::Self_.clone() {
                         return Some((TypeNs::AdtSelfType(adt), remaining_idx(), None));
                     }
                 }
@@ -259,9 +263,11 @@ impl Resolver {
         &self,
         db: &dyn DefDatabase,
         path: &Path,
+        mut hygiene_id: HygieneId,
     ) -> Option<ResolveValueResult> {
         let path = match path {
-            Path::Normal { mod_path, .. } => mod_path,
+            Path::BarePath(mod_path) => mod_path,
+            Path::Normal(it) => it.mod_path(),
             Path::LangItem(l, None) => {
                 return Some(ResolveValueResult::ValueNs(
                     match *l {
@@ -294,7 +300,7 @@ impl Resolver {
             }
         };
         let n_segments = path.segments().len();
-        let tmp = name![self];
+        let tmp = Name::new_symbol_root(sym::self_.clone());
         let first_name = if path.is_self() { &tmp } else { path.segments().first()? };
         let skip_to_mod = path.kind != PathKind::Plain && !path.is_self();
         if skip_to_mod {
@@ -302,20 +308,43 @@ impl Resolver {
         }
 
         if n_segments <= 1 {
+            let mut hygiene_info = if !hygiene_id.is_root() {
+                let ctx = db.lookup_intern_syntax_context(hygiene_id.0);
+                ctx.outer_expn.map(|expansion| {
+                    let expansion = db.lookup_intern_macro_call(expansion);
+                    (ctx.parent, expansion.def)
+                })
+            } else {
+                None
+            };
             for scope in self.scopes() {
                 match scope {
                     Scope::ExprScope(scope) => {
-                        let entry = scope
-                            .expr_scopes
-                            .entries(scope.scope_id)
-                            .iter()
-                            .find(|entry| entry.name() == first_name);
+                        let entry =
+                            scope.expr_scopes.entries(scope.scope_id).iter().find(|entry| {
+                                entry.name() == first_name && entry.hygiene() == hygiene_id
+                            });
 
                         if let Some(e) = entry {
                             return Some(ResolveValueResult::ValueNs(
                                 ValueNs::LocalBinding(e.binding()),
                                 None,
                             ));
+                        }
+                    }
+                    Scope::MacroDefScope(macro_id) => {
+                        if let Some((parent_ctx, label_macro_id)) = hygiene_info {
+                            if label_macro_id == **macro_id {
+                                // A macro is allowed to refer to variables from before its declaration.
+                                // Therefore, if we got to the rib of its declaration, give up its hygiene
+                                // and use its parent expansion.
+                                let parent_ctx = db.lookup_intern_syntax_context(parent_ctx);
+                                hygiene_id = HygieneId::new(parent_ctx.opaque_and_semitransparent);
+                                hygiene_info = parent_ctx.outer_expn.map(|expansion| {
+                                    let expansion = db.lookup_intern_macro_call(expansion);
+                                    (parent_ctx.parent, expansion.def)
+                                });
+                            }
                         }
                     }
                     Scope::GenericParams { params, def } => {
@@ -325,7 +354,7 @@ impl Resolver {
                         }
                     }
                     &Scope::ImplDefScope(impl_) => {
-                        if first_name == &name![Self] {
+                        if *first_name == sym::Self_.clone() {
                             return Some(ResolveValueResult::ValueNs(
                                 ValueNs::ImplSelf(impl_),
                                 None,
@@ -344,7 +373,7 @@ impl Resolver {
         } else {
             for scope in self.scopes() {
                 match scope {
-                    Scope::ExprScope(_) => continue,
+                    Scope::ExprScope(_) | Scope::MacroDefScope(_) => continue,
                     Scope::GenericParams { params, def } => {
                         if let Some(id) = params.find_type_by_name(first_name, *def) {
                             let ty = TypeNs::GenericParam(id);
@@ -352,7 +381,7 @@ impl Resolver {
                         }
                     }
                     &Scope::ImplDefScope(impl_) => {
-                        if first_name == &name![Self] {
+                        if *first_name == sym::Self_.clone() {
                             return Some(ResolveValueResult::Partial(
                                 TypeNs::SelfType(impl_),
                                 1,
@@ -361,7 +390,7 @@ impl Resolver {
                         }
                     }
                     Scope::AdtScope(adt) => {
-                        if first_name == &name![Self] {
+                        if *first_name == sym::Self_.clone() {
                             let ty = TypeNs::AdtSelfType(*adt);
                             return Some(ResolveValueResult::Partial(ty, 1, None));
                         }
@@ -395,8 +424,9 @@ impl Resolver {
         &self,
         db: &dyn DefDatabase,
         path: &Path,
+        hygiene: HygieneId,
     ) -> Option<ValueNs> {
-        match self.resolve_path_in_value_ns(db, path)? {
+        match self.resolve_path_in_value_ns(db, path, hygiene)? {
             ResolveValueResult::ValueNs(it, _) => Some(it),
             ResolveValueResult::Partial(..) => None,
         }
@@ -425,7 +455,7 @@ impl Resolver {
     }
 
     pub fn resolve_lifetime(&self, lifetime: &LifetimeRef) -> Option<LifetimeNs> {
-        if lifetime.name == name::known::STATIC_LIFETIME {
+        if lifetime.name == sym::tick_static.clone() {
             return Some(LifetimeNs::Static);
         }
 
@@ -500,9 +530,11 @@ impl Resolver {
                 res.add(name, ScopeDef::ModuleDef(ModuleDefId::MacroId(mac)));
             })
         });
-        def_map.macro_use_prelude().for_each(|(name, (def, _extern_crate))| {
-            res.add(name, ScopeDef::ModuleDef(def.into()));
-        });
+        def_map.macro_use_prelude().iter().sorted_by_key(|&(k, _)| k.clone()).for_each(
+            |(name, &(def, _extern_crate))| {
+                res.add(name, ScopeDef::ModuleDef(def.into()));
+            },
+        );
         def_map.extern_prelude().for_each(|(name, (def, _extern_crate))| {
             res.add(name, ScopeDef::ModuleDef(ModuleDefId::ModuleId(def.into())));
         });
@@ -590,13 +622,15 @@ impl Resolver {
 
     pub fn where_predicates_in_scope(
         &self,
-    ) -> impl Iterator<Item = (&crate::generics::WherePredicate, &GenericDefId)> {
+    ) -> impl Iterator<Item = (&crate::generics::WherePredicate, (&GenericDefId, &TypesMap))> {
         self.scopes()
             .filter_map(|scope| match scope {
                 Scope::GenericParams { params, def } => Some((params, def)),
                 _ => None,
             })
-            .flat_map(|(params, def)| params.where_predicates.iter().zip(iter::repeat(def)))
+            .flat_map(|(params, def)| {
+                params.where_predicates().zip(iter::repeat((def, &params.types_map)))
+            })
     }
 
     pub fn generic_def(&self) -> Option<GenericDefId> {
@@ -606,9 +640,16 @@ impl Resolver {
         })
     }
 
-    pub fn generic_params(&self) -> Option<&Interned<GenericParams>> {
+    pub fn generic_params(&self) -> Option<&Arc<GenericParams>> {
         self.scopes().find_map(|scope| match scope {
             Scope::GenericParams { params, .. } => Some(params),
+            _ => None,
+        })
+    }
+
+    pub fn all_generic_params(&self) -> impl Iterator<Item = (&GenericParams, &GenericDefId)> {
+        self.scopes().filter_map(|scope| match scope {
+            Scope::GenericParams { params, def } => Some((&**params, def)),
             _ => None,
         })
     }
@@ -622,7 +663,7 @@ impl Resolver {
 
     pub fn type_owner(&self) -> Option<TypeOwnerId> {
         self.scopes().find_map(|scope| match scope {
-            Scope::BlockScope(_) => None,
+            Scope::BlockScope(_) | Scope::MacroDefScope(_) => None,
             &Scope::GenericParams { def, .. } => Some(def.into()),
             &Scope::ImplDefScope(id) => Some(id.into()),
             &Scope::AdtScope(adt) => Some(adt.into()),
@@ -653,6 +694,9 @@ impl Resolver {
             expr_scopes: &Arc<ExprScopes>,
             scope_id: ScopeId,
         ) {
+            if let Some(macro_id) = expr_scopes.macro_def(scope_id) {
+                resolver.scopes.push(Scope::MacroDefScope(macro_id.clone()));
+            }
             resolver.scopes.push(Scope::ExprScope(ExprScope {
                 owner,
                 expr_scopes: expr_scopes.clone(),
@@ -670,7 +714,7 @@ impl Resolver {
         }
 
         let start = self.scopes.len();
-        let innermost_scope = self.scopes().next();
+        let innermost_scope = self.scopes().find(|scope| !matches!(scope, Scope::MacroDefScope(_)));
         match innermost_scope {
             Some(&Scope::ExprScope(ExprScope { scope_id, ref expr_scopes, owner })) => {
                 let expr_scopes = expr_scopes.clone();
@@ -758,10 +802,10 @@ impl Scope {
             }
             Scope::GenericParams { params, def: parent } => {
                 let parent = *parent;
-                for (local_id, param) in params.type_or_consts.iter() {
+                for (local_id, param) in params.iter_type_or_consts() {
                     if let Some(name) = &param.name() {
                         let id = TypeOrConstParamId { parent, local_id };
-                        let data = &db.generic_params(parent).type_or_consts[local_id];
+                        let data = &db.generic_params(parent)[local_id];
                         acc.add(
                             name,
                             ScopeDef::GenericParam(match data {
@@ -775,16 +819,16 @@ impl Scope {
                         );
                     }
                 }
-                for (local_id, param) in params.lifetimes.iter() {
+                for (local_id, param) in params.iter_lt() {
                     let id = LifetimeParamId { parent, local_id };
                     acc.add(&param.name, ScopeDef::GenericParam(id.into()))
                 }
             }
             Scope::ImplDefScope(i) => {
-                acc.add(&name![Self], ScopeDef::ImplSelfType(*i));
+                acc.add(&Name::new_symbol_root(sym::Self_.clone()), ScopeDef::ImplSelfType(*i));
             }
             Scope::AdtScope(i) => {
-                acc.add(&name![Self], ScopeDef::AdtSelfType(*i));
+                acc.add(&Name::new_symbol_root(sym::Self_.clone()), ScopeDef::AdtSelfType(*i));
             }
             Scope::ExprScope(scope) => {
                 if let Some((label, name)) = scope.expr_scopes.label(scope.scope_id) {
@@ -794,6 +838,7 @@ impl Scope {
                     acc.add_local(e.name(), e.binding());
                 });
             }
+            Scope::MacroDefScope(_) => {}
         }
     }
 }
@@ -832,6 +877,9 @@ fn resolver_for_scope_(
             // FIXME: This adds as many module scopes as there are blocks, but resolving in each
             // already traverses all parents, so this is O(n²). I think we could only store the
             // innermost module scope instead?
+        }
+        if let Some(macro_id) = scopes.macro_def(scope) {
+            r = r.push_scope(Scope::MacroDefScope(macro_id.clone()));
         }
 
         r = r.push_expr_scope(owner, Arc::clone(&scopes), scope);
@@ -1006,12 +1054,12 @@ impl HasResolver for ModuleId {
     fn resolver(self, db: &dyn DefDatabase) -> Resolver {
         let mut def_map = self.def_map(db);
         let mut module_id = self.local_id;
-        let mut modules: SmallVec<[_; 1]> = smallvec![];
 
         if !self.is_block_module() {
             return Resolver { scopes: vec![], module_scope: ModuleItemMap { def_map, module_id } };
         }
 
+        let mut modules: SmallVec<[_; 1]> = smallvec![];
         while let Some(parent) = def_map.parent() {
             let block_def_map = mem::replace(&mut def_map, parent.def_map(db));
             modules.push(block_def_map);
@@ -1164,7 +1212,6 @@ impl HasResolver for GenericDefId {
             GenericDefId::TraitAliasId(inner) => inner.resolver(db),
             GenericDefId::TypeAliasId(inner) => inner.resolver(db),
             GenericDefId::ImplId(inner) => inner.resolver(db),
-            GenericDefId::EnumVariantId(inner) => inner.resolver(db),
             GenericDefId::ConstId(inner) => inner.resolver(db),
         }
     }

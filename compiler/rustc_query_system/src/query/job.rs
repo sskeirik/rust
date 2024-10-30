@@ -1,18 +1,12 @@
-use crate::dep_graph::DepContext;
-use crate::error::CycleStack;
-use crate::query::plumbing::CycleError;
-use crate::query::DepKind;
-use crate::query::{QueryContext, QueryStackFrame};
-use rustc_data_structures::fx::FxHashMap;
-use rustc_errors::{Diag, DiagCtxt};
-use rustc_hir::def::DefKind;
-use rustc_session::Session;
-use rustc_span::Span;
-
 use std::hash::Hash;
 use std::io::Write;
 use std::num::NonZero;
 
+use rustc_data_structures::fx::FxHashMap;
+use rustc_errors::{Diag, DiagCtxtHandle};
+use rustc_hir::def::DefKind;
+use rustc_session::Session;
+use rustc_span::Span;
 #[cfg(parallel_compiler)]
 use {
     parking_lot::{Condvar, Mutex},
@@ -22,6 +16,11 @@ use {
     std::iter,
     std::sync::Arc,
 };
+
+use crate::dep_graph::DepContext;
+use crate::error::CycleStack;
+use crate::query::plumbing::CycleError;
+use crate::query::{DepKind, QueryContext, QueryStackFrame};
 
 /// Represents a span and a query key.
 #[derive(Clone, Debug)]
@@ -238,7 +237,7 @@ impl QueryLatch {
             // the `wait` call below, by 1) the `set` method or 2) by deadlock detection.
             // Both of these will remove it from the `waiters` list before resuming
             // this thread.
-            info.waiters.push(waiter.clone());
+            info.waiters.push(Arc::clone(waiter));
 
             // If this detects a deadlock and the deadlock handler wants to resume this thread
             // we have to be in the `wait` call. This is ensured by the deadlock handler
@@ -589,7 +588,7 @@ pub fn report_cycle<'a>(
         cycle_stack,
         stack_bottom: stack[0].query.description.to_owned(),
         alias,
-        cycle_usage: cycle_usage,
+        cycle_usage,
         stack_count,
         note_span: (),
     };
@@ -600,7 +599,7 @@ pub fn report_cycle<'a>(
 pub fn print_query_stack<Qcx: QueryContext>(
     qcx: Qcx,
     mut current_query: Option<QueryJobId>,
-    dcx: &DiagCtxt,
+    dcx: DiagCtxtHandle<'_>,
     num_frames: Option<usize>,
     mut file: Option<std::fs::File>,
 ) -> usize {

@@ -1,20 +1,21 @@
 //! Support code for rustdoc and external tools.
 //! You really don't want to be using this unless you need to.
 
-use super::*;
-
-use crate::errors::UnableToConstructConstantValue;
-use crate::infer::region_constraints::{Constraint, RegionConstraintData};
-use crate::traits::project::ProjectAndUnifyResult;
+use std::collections::VecDeque;
+use std::iter;
 
 use rustc_data_structures::fx::{FxIndexMap, FxIndexSet, IndexEntry};
 use rustc_data_structures::unord::UnordSet;
 use rustc_infer::infer::DefineOpaqueTypes;
 use rustc_middle::mir::interpret::ErrorHandled;
 use rustc_middle::ty::{Region, RegionVid};
+use tracing::debug;
+use ty::TypingMode;
 
-use std::collections::VecDeque;
-use std::iter;
+use super::*;
+use crate::errors::UnableToConstructConstantValue;
+use crate::infer::region_constraints::{Constraint, RegionConstraintData};
+use crate::traits::project::ProjectAndUnifyResult;
 
 // FIXME(twk): this is obviously not nice to duplicate like that
 #[derive(Eq, PartialEq, Hash, Copy, Clone, Debug)]
@@ -79,7 +80,7 @@ impl<'tcx> AutoTraitFinder<'tcx> {
 
         let trait_ref = ty::TraitRef::new(tcx, trait_did, [ty]);
 
-        let infcx = tcx.infer_ctxt().build();
+        let infcx = tcx.infer_ctxt().build(TypingMode::non_body_analysis());
         let mut selcx = SelectionContext::new(&infcx);
         for polarity in [ty::PredicatePolarity::Positive, ty::PredicatePolarity::Negative] {
             let result = selcx.select(&Obligation::new(
@@ -99,7 +100,7 @@ impl<'tcx> AutoTraitFinder<'tcx> {
             }
         }
 
-        let infcx = tcx.infer_ctxt().build();
+        let infcx = tcx.infer_ctxt().build(TypingMode::non_body_analysis());
         let mut fresh_preds = FxIndexSet::default();
 
         // Due to the way projections are handled by SelectionContext, we need to run
@@ -765,13 +766,13 @@ impl<'tcx> AutoTraitFinder<'tcx> {
                                 unevaluated,
                                 obligation.cause.span,
                             ) {
-                                Ok(Some(valtree)) => Ok(ty::Const::new_value(selcx.tcx(),valtree, c.ty())),
-                                Ok(None) => {
+                                Ok(Ok(valtree)) => Ok(ty::Const::new_value(selcx.tcx(),valtree, self.tcx.type_of(unevaluated.def).instantiate(self.tcx, unevaluated.args))),
+                                Ok(Err(_)) => {
                                     let tcx = self.tcx;
                                     let reported =
                                         tcx.dcx().emit_err(UnableToConstructConstantValue {
                                             span: tcx.def_span(unevaluated.def),
-                                            unevaluated: unevaluated,
+                                            unevaluated,
                                         });
                                     Err(ErrorHandled::Reported(reported.into(), tcx.def_span(unevaluated.def)))
                                 }
@@ -802,11 +803,12 @@ impl<'tcx> AutoTraitFinder<'tcx> {
                 | ty::PredicateKind::Clause(ty::ClauseKind::ConstArgHasType(..))
                 | ty::PredicateKind::NormalizesTo(..)
                 | ty::PredicateKind::AliasRelate(..)
-                | ty::PredicateKind::ObjectSafe(..)
+                | ty::PredicateKind::DynCompatible(..)
                 | ty::PredicateKind::Subtype(..)
                 // FIXME(generic_const_exprs): you can absolutely add this as a where clauses
                 | ty::PredicateKind::Clause(ty::ClauseKind::ConstEvaluatable(..))
-                | ty::PredicateKind::Coerce(..) => {}
+                | ty::PredicateKind::Coerce(..)
+                | ty::PredicateKind::Clause(ty::ClauseKind::HostEffect(..)) => {}
                 ty::PredicateKind::Ambiguous => return false,
             };
         }

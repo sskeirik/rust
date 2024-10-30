@@ -1,4 +1,4 @@
-use base_db::{SourceDatabase, SourceDatabaseExt2 as _};
+use base_db::{SourceDatabase, SourceDatabaseFileInputExt as _};
 use test_fixture::WithFixture;
 
 use crate::{db::DefDatabase, nameres::tests::TestDB, AdtId, ModuleDefId};
@@ -16,7 +16,7 @@ fn check_def_map_is_not_recomputed(ra_fixture_initial: &str, ra_fixture_change: 
         });
         assert!(format!("{events:?}").contains("crate_def_map"), "{events:#?}")
     }
-    db.set_file_text(pos.file_id, ra_fixture_change);
+    db.set_file_text(pos.file_id.file_id(), ra_fixture_change);
 
     {
         let events = db.log_executed(|| {
@@ -253,7 +253,8 @@ m!(Z);
             let (_, module_data) = crate_def_map.modules.iter().last().unwrap();
             assert_eq!(module_data.scope.resolutions().count(), 4);
         });
-        let n_recalculated_item_trees = events.iter().filter(|it| it.contains("item_tree")).count();
+        let n_recalculated_item_trees =
+            events.iter().filter(|it| it.contains("item_tree(")).count();
         assert_eq!(n_recalculated_item_trees, 6);
         let n_reparsed_macros =
             events.iter().filter(|it| it.contains("parse_macro_expansion(")).count();
@@ -266,7 +267,7 @@ fn quux() { 92 }
 m!(Y);
 m!(Z);
 "#;
-    db.set_file_text(pos.file_id, new_text);
+    db.set_file_text(pos.file_id.file_id(), new_text);
 
     {
         let events = db.log_executed(|| {
@@ -308,7 +309,7 @@ pub type Ty = ();
         let events = db.log_executed(|| {
             db.file_item_tree(pos.file_id.into());
         });
-        let n_calculated_item_trees = events.iter().filter(|it| it.contains("item_tree")).count();
+        let n_calculated_item_trees = events.iter().filter(|it| it.contains("item_tree(")).count();
         assert_eq!(n_calculated_item_trees, 1);
         let n_parsed_files = events.iter().filter(|it| it.contains("parse(")).count();
         assert_eq!(n_parsed_files, 1);

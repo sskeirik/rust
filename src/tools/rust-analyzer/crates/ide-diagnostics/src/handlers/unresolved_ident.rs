@@ -11,7 +11,7 @@ pub(crate) fn unresolved_ident(
         ctx,
         DiagnosticCode::RustcHardError("E0425"),
         "no such value in this scope",
-        d.expr.map(Into::into),
+        d.expr_or_pat.map(Into::into),
     )
     .experimental()
 }
@@ -52,6 +52,22 @@ fn main() {
 fn main() {
     let x = 5;
     let _ = x;
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn unresolved_self_val() {
+        check_diagnostics(
+            r#"
+fn main() {
+    self.a;
+  //^^^^ error: no such value in this scope
+    let self:
+         self =
+            self;
+          //^^^^ error: no such value in this scope
 }
 "#,
         );

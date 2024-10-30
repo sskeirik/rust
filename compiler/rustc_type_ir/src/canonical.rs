@@ -1,32 +1,41 @@
-#[cfg(feature = "nightly")]
-use rustc_macros::{HashStable_NoContext, TyDecodable, TyEncodable};
-use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic};
 use std::fmt;
 use std::hash::Hash;
 use std::ops::Index;
 
+use derive_where::derive_where;
+#[cfg(feature = "nightly")]
+use rustc_macros::{HashStable_NoContext, TyDecodable, TyEncodable};
+use rustc_type_ir_macros::{Lift_Generic, TypeFoldable_Generic, TypeVisitable_Generic};
+
 use crate::inherent::*;
-use crate::{self as ty, Interner, UniverseIndex};
+use crate::{self as ty, Interner, TypingMode, UniverseIndex};
+
+#[derive_where(Clone; I: Interner, V: Clone)]
+#[derive_where(Hash; I: Interner, V: Hash)]
+#[derive_where(PartialEq; I: Interner, V: PartialEq)]
+#[derive_where(Eq; I: Interner, V: Eq)]
+#[derive_where(Debug; I: Interner, V: fmt::Debug)]
+#[derive_where(Copy; I: Interner, V: Copy)]
+#[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
+pub struct CanonicalQueryInput<I: Interner, V> {
+    pub canonical: Canonical<I, V>,
+    pub typing_mode: TypingMode<I>,
+}
 
 /// A "canonicalized" type `V` is one where all free inference
 /// variables have been rewritten to "canonical vars". These are
 /// numbered starting from 0 in order of first appearance.
-#[derive(derivative::Derivative)]
-#[derivative(
-    Clone(bound = "V: Clone"),
-    Hash(bound = "V: Hash"),
-    PartialEq(bound = "V: PartialEq"),
-    Eq(bound = "V: Eq"),
-    Debug(bound = "V: fmt::Debug"),
-    Copy(bound = "V: Copy")
-)]
+#[derive_where(Clone; I: Interner, V: Clone)]
+#[derive_where(Hash; I: Interner, V: Hash)]
+#[derive_where(PartialEq; I: Interner, V: PartialEq)]
+#[derive_where(Eq; I: Interner, V: Eq)]
+#[derive_where(Debug; I: Interner, V: fmt::Debug)]
+#[derive_where(Copy; I: Interner, V: Copy)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 pub struct Canonical<I: Interner, V> {
     pub value: V,
     pub max_universe: UniverseIndex,
-    // FIXME(lcnr, oli-obk): try moving this into the query inputs instead
-    pub defining_opaque_types: I::DefiningOpaqueTypes,
     pub variables: I::CanonicalVars,
 }
 
@@ -55,27 +64,17 @@ impl<I: Interner, V> Canonical<I, V> {
     /// let b: Canonical<I, (T, Ty<I>)> = a.unchecked_map(|v| (v, ty));
     /// ```
     pub fn unchecked_map<W>(self, map_op: impl FnOnce(V) -> W) -> Canonical<I, W> {
-        let Canonical { defining_opaque_types, max_universe, variables, value } = self;
-        Canonical { defining_opaque_types, max_universe, variables, value: map_op(value) }
-    }
-
-    /// Allows you to map the `value` of a canonical while keeping the same set of
-    /// bound variables.
-    ///
-    /// **WARNING:** This function is very easy to mis-use, hence the name! See
-    /// the comment of [Canonical::unchecked_map] for more details.
-    pub fn unchecked_rebind<W>(self, value: W) -> Canonical<I, W> {
-        let Canonical { defining_opaque_types, max_universe, variables, value: _ } = self;
-        Canonical { defining_opaque_types, max_universe, variables, value }
+        let Canonical { max_universe, variables, value } = self;
+        Canonical { max_universe, variables, value: map_op(value) }
     }
 }
 
 impl<I: Interner, V: fmt::Display> fmt::Display for Canonical<I, V> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { value, max_universe, variables, defining_opaque_types } = self;
+        let Self { value, max_universe, variables } = self;
         write!(
             f,
-            "Canonical {{ value: {value}, max_universe: {max_universe:?}, variables: {variables:?}, defining_opaque_types: {defining_opaque_types:?} }}",
+            "Canonical {{ value: {value}, max_universe: {max_universe:?}, variables: {variables:?} }}",
         )
     }
 }
@@ -84,15 +83,7 @@ impl<I: Interner, V: fmt::Display> fmt::Display for Canonical<I, V> {
 /// canonical value. This is sufficient information for code to create
 /// a copy of the canonical value in some other inference context,
 /// with fresh inference variables replacing the canonical values.
-#[derive(derivative::Derivative)]
-#[derivative(
-    Clone(bound = ""),
-    Copy(bound = ""),
-    Hash(bound = ""),
-    Debug(bound = ""),
-    Eq(bound = ""),
-    PartialEq(bound = "")
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub struct CanonicalVarInfo<I: Interner> {
@@ -115,9 +106,8 @@ impl<I: Interner> CanonicalVarInfo<I> {
             CanonicalVarKind::PlaceholderTy(_) => false,
             CanonicalVarKind::Region(_) => true,
             CanonicalVarKind::PlaceholderRegion(..) => false,
-            CanonicalVarKind::Const(..) => true,
-            CanonicalVarKind::PlaceholderConst(_, _) => false,
-            CanonicalVarKind::Effect => true,
+            CanonicalVarKind::Const(_) => true,
+            CanonicalVarKind::PlaceholderConst(_) => false,
         }
     }
 
@@ -126,22 +116,20 @@ impl<I: Interner> CanonicalVarInfo<I> {
             CanonicalVarKind::Region(_) | CanonicalVarKind::PlaceholderRegion(_) => true,
             CanonicalVarKind::Ty(_)
             | CanonicalVarKind::PlaceholderTy(_)
-            | CanonicalVarKind::Const(_, _)
-            | CanonicalVarKind::PlaceholderConst(_, _)
-            | CanonicalVarKind::Effect => false,
+            | CanonicalVarKind::Const(_)
+            | CanonicalVarKind::PlaceholderConst(_) => false,
         }
     }
 
     pub fn expect_placeholder_index(self) -> usize {
         match self.kind {
-            CanonicalVarKind::Ty(_)
-            | CanonicalVarKind::Region(_)
-            | CanonicalVarKind::Const(_, _)
-            | CanonicalVarKind::Effect => panic!("expected placeholder: {self:?}"),
+            CanonicalVarKind::Ty(_) | CanonicalVarKind::Region(_) | CanonicalVarKind::Const(_) => {
+                panic!("expected placeholder: {self:?}")
+            }
 
             CanonicalVarKind::PlaceholderRegion(placeholder) => placeholder.var().as_usize(),
             CanonicalVarKind::PlaceholderTy(placeholder) => placeholder.var().as_usize(),
-            CanonicalVarKind::PlaceholderConst(placeholder, _) => placeholder.var().as_usize(),
+            CanonicalVarKind::PlaceholderConst(placeholder) => placeholder.var().as_usize(),
         }
     }
 }
@@ -149,8 +137,7 @@ impl<I: Interner> CanonicalVarInfo<I> {
 /// Describes the "kind" of the canonical variable. This is a "kind"
 /// in the type-theory sense of the term -- i.e., a "meta" type system
 /// that analyzes type-like values.
-#[derive(derivative::Derivative)]
-#[derivative(Clone(bound = ""), Copy(bound = ""), Hash(bound = ""), Debug(bound = ""))]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic)]
 #[cfg_attr(feature = "nightly", derive(TyDecodable, TyEncodable, HashStable_NoContext))]
 pub enum CanonicalVarKind<I: Interner> {
@@ -169,29 +156,10 @@ pub enum CanonicalVarKind<I: Interner> {
     PlaceholderRegion(I::PlaceholderRegion),
 
     /// Some kind of const inference variable.
-    Const(UniverseIndex, I::Ty),
-
-    /// Effect variable `'?E`.
-    Effect,
+    Const(UniverseIndex),
 
     /// A "placeholder" that represents "any const".
-    PlaceholderConst(I::PlaceholderConst, I::Ty),
-}
-
-impl<I: Interner> PartialEq for CanonicalVarKind<I> {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Ty(l0), Self::Ty(r0)) => l0 == r0,
-            (Self::PlaceholderTy(l0), Self::PlaceholderTy(r0)) => l0 == r0,
-            (Self::Region(l0), Self::Region(r0)) => l0 == r0,
-            (Self::PlaceholderRegion(l0), Self::PlaceholderRegion(r0)) => l0 == r0,
-            (Self::Const(l0, l1), Self::Const(r0, r1)) => l0 == r0 && l1 == r1,
-            (Self::PlaceholderConst(l0, l1), Self::PlaceholderConst(r0, r1)) => {
-                l0 == r0 && l1 == r1
-            }
-            _ => std::mem::discriminant(self) == std::mem::discriminant(other),
-        }
-    }
+    PlaceholderConst(I::PlaceholderConst),
 }
 
 impl<I: Interner> CanonicalVarKind<I> {
@@ -199,14 +167,13 @@ impl<I: Interner> CanonicalVarKind<I> {
         match self {
             CanonicalVarKind::Ty(CanonicalTyVarKind::General(ui)) => ui,
             CanonicalVarKind::Region(ui) => ui,
-            CanonicalVarKind::Const(ui, _) => ui,
+            CanonicalVarKind::Const(ui) => ui,
             CanonicalVarKind::PlaceholderTy(placeholder) => placeholder.universe(),
             CanonicalVarKind::PlaceholderRegion(placeholder) => placeholder.universe(),
-            CanonicalVarKind::PlaceholderConst(placeholder, _) => placeholder.universe(),
+            CanonicalVarKind::PlaceholderConst(placeholder) => placeholder.universe(),
             CanonicalVarKind::Ty(CanonicalTyVarKind::Float | CanonicalTyVarKind::Int) => {
                 UniverseIndex::ROOT
             }
-            CanonicalVarKind::Effect => UniverseIndex::ROOT,
         }
     }
 
@@ -220,7 +187,7 @@ impl<I: Interner> CanonicalVarKind<I> {
                 CanonicalVarKind::Ty(CanonicalTyVarKind::General(ui))
             }
             CanonicalVarKind::Region(_) => CanonicalVarKind::Region(ui),
-            CanonicalVarKind::Const(_, ty) => CanonicalVarKind::Const(ui, ty),
+            CanonicalVarKind::Const(_) => CanonicalVarKind::Const(ui),
 
             CanonicalVarKind::PlaceholderTy(placeholder) => {
                 CanonicalVarKind::PlaceholderTy(placeholder.with_updated_universe(ui))
@@ -228,11 +195,10 @@ impl<I: Interner> CanonicalVarKind<I> {
             CanonicalVarKind::PlaceholderRegion(placeholder) => {
                 CanonicalVarKind::PlaceholderRegion(placeholder.with_updated_universe(ui))
             }
-            CanonicalVarKind::PlaceholderConst(placeholder, ty) => {
-                CanonicalVarKind::PlaceholderConst(placeholder.with_updated_universe(ui), ty)
+            CanonicalVarKind::PlaceholderConst(placeholder) => {
+                CanonicalVarKind::PlaceholderConst(placeholder.with_updated_universe(ui))
             }
-            CanonicalVarKind::Ty(CanonicalTyVarKind::Int | CanonicalTyVarKind::Float)
-            | CanonicalVarKind::Effect => {
+            CanonicalVarKind::Ty(CanonicalTyVarKind::Int | CanonicalTyVarKind::Float) => {
                 assert_eq!(ui, UniverseIndex::ROOT);
                 self
             }
@@ -268,15 +234,7 @@ pub enum CanonicalTyVarKind {
 /// vectors with the original values that were replaced by canonical
 /// variables. You will need to supply it later to instantiate the
 /// canonicalized query response.
-#[derive(derivative::Derivative)]
-#[derivative(
-    Clone(bound = ""),
-    Copy(bound = ""),
-    PartialEq(bound = ""),
-    Eq(bound = ""),
-    Hash(bound = ""),
-    Debug(bound = "")
-)]
+#[derive_where(Clone, Copy, Hash, PartialEq, Eq, Debug; I: Interner)]
 #[cfg_attr(feature = "nightly", derive(TyEncodable, TyDecodable, HashStable_NoContext))]
 #[derive(TypeVisitable_Generic, TypeFoldable_Generic, Lift_Generic)]
 pub struct CanonicalVarValues<I: Interner> {
@@ -285,7 +243,7 @@ pub struct CanonicalVarValues<I: Interner> {
 
 impl<I: Interner> CanonicalVarValues<I> {
     pub fn is_identity(&self) -> bool {
-        self.var_values.into_iter().enumerate().all(|(bv, arg)| match arg.kind() {
+        self.var_values.iter().enumerate().all(|(bv, arg)| match arg.kind() {
             ty::GenericArgKind::Lifetime(r) => {
                 matches!(r.kind(), ty::ReBound(ty::INNERMOST, br) if br.var().as_usize() == bv)
             }
@@ -300,7 +258,7 @@ impl<I: Interner> CanonicalVarValues<I> {
 
     pub fn is_identity_modulo_regions(&self) -> bool {
         let mut var = ty::BoundVar::ZERO;
-        for arg in self.var_values {
+        for arg in self.var_values.iter() {
             match arg.kind() {
                 ty::GenericArgKind::Lifetime(r) => {
                     if matches!(r.kind(), ty::ReBound(ty::INNERMOST, br) if var == br.var()) {
@@ -332,34 +290,23 @@ impl<I: Interner> CanonicalVarValues<I> {
 
     // Given a list of canonical variables, construct a set of values which are
     // the identity response.
-    pub fn make_identity(tcx: I, infos: I::CanonicalVars) -> CanonicalVarValues<I> {
+    pub fn make_identity(cx: I, infos: I::CanonicalVars) -> CanonicalVarValues<I> {
         CanonicalVarValues {
-            var_values: tcx.mk_args_from_iter(infos.into_iter().enumerate().map(
+            var_values: cx.mk_args_from_iter(infos.iter().enumerate().map(
                 |(i, info)| -> I::GenericArg {
                     match info.kind {
                         CanonicalVarKind::Ty(_) | CanonicalVarKind::PlaceholderTy(_) => {
-                            Ty::new_anon_bound(tcx, ty::INNERMOST, ty::BoundVar::from_usize(i))
+                            Ty::new_anon_bound(cx, ty::INNERMOST, ty::BoundVar::from_usize(i))
                                 .into()
                         }
                         CanonicalVarKind::Region(_) | CanonicalVarKind::PlaceholderRegion(_) => {
-                            Region::new_anon_bound(tcx, ty::INNERMOST, ty::BoundVar::from_usize(i))
+                            Region::new_anon_bound(cx, ty::INNERMOST, ty::BoundVar::from_usize(i))
                                 .into()
                         }
-                        CanonicalVarKind::Effect => Const::new_anon_bound(
-                            tcx,
-                            ty::INNERMOST,
-                            ty::BoundVar::from_usize(i),
-                            Ty::new_bool(tcx),
-                        )
-                        .into(),
-                        CanonicalVarKind::Const(_, ty)
-                        | CanonicalVarKind::PlaceholderConst(_, ty) => Const::new_anon_bound(
-                            tcx,
-                            ty::INNERMOST,
-                            ty::BoundVar::from_usize(i),
-                            ty,
-                        )
-                        .into(),
+                        CanonicalVarKind::Const(_) | CanonicalVarKind::PlaceholderConst(_) => {
+                            Const::new_anon_bound(cx, ty::INNERMOST, ty::BoundVar::from_usize(i))
+                                .into()
+                        }
                     }
                 },
             )),
@@ -380,10 +327,10 @@ impl<I: Interner> CanonicalVarValues<I> {
 
 impl<'a, I: Interner> IntoIterator for &'a CanonicalVarValues<I> {
     type Item = I::GenericArg;
-    type IntoIter = <I::GenericArgs as IntoIterator>::IntoIter;
+    type IntoIter = <I::GenericArgs as SliceLike>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.var_values.into_iter()
+        self.var_values.iter()
     }
 }
 
@@ -391,6 +338,6 @@ impl<I: Interner> Index<ty::BoundVar> for CanonicalVarValues<I> {
     type Output = I::GenericArg;
 
     fn index(&self, value: ty::BoundVar) -> &I::GenericArg {
-        &self.var_values[value.as_usize()]
+        &self.var_values.as_slice()[value.as_usize()]
     }
 }

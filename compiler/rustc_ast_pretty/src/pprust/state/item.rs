@@ -1,13 +1,19 @@
-use crate::pp::Breaks::Inconsistent;
-use crate::pprust::state::fixup::FixupContext;
-use crate::pprust::state::{AnnNode, PrintState, State, INDENT_UNIT};
-
 use ast::StaticItem;
 use itertools::{Itertools, Position};
 use rustc_ast as ast;
-use rustc_ast::ptr::P;
 use rustc_ast::ModKind;
+use rustc_ast::ptr::P;
 use rustc_span::symbol::Ident;
+
+use crate::pp::Breaks::Inconsistent;
+use crate::pprust::state::fixup::FixupContext;
+use crate::pprust::state::{AnnNode, INDENT_UNIT, PrintState, State};
+
+enum DelegationKind<'a> {
+    Single,
+    List(&'a [(Ident, Option<Ident>)]),
+    Glob,
+}
 
 fn visibility_qualified(vis: &ast::Visibility, s: &str) -> String {
     format!("{}{}", State::to_string(|s| s.print_visibility(vis)), s)
@@ -31,7 +37,7 @@ impl<'a> State<'a> {
             ast::ForeignItemKind::Fn(box ast::Fn { defaultness, sig, generics, body }) => {
                 self.print_fn_full(sig, ident, generics, vis, *defaultness, body.as_deref(), attrs);
             }
-            ast::ForeignItemKind::Static(box ast::StaticForeignItem { ty, mutability, expr }) => {
+            ast::ForeignItemKind::Static(box ast::StaticItem { ty, mutability, expr, safety }) => {
                 self.print_item_const(
                     ident,
                     Some(*mutability),
@@ -39,6 +45,7 @@ impl<'a> State<'a> {
                     ty,
                     expr.as_deref(),
                     vis,
+                    *safety,
                     ast::Defaultness::Final,
                 )
             }
@@ -77,10 +84,12 @@ impl<'a> State<'a> {
         ty: &ast::Ty,
         body: Option<&ast::Expr>,
         vis: &ast::Visibility,
+        safety: ast::Safety,
         defaultness: ast::Defaultness,
     ) {
         self.head("");
         self.print_visibility(vis);
+        self.print_safety(safety);
         self.print_defaultness(defaultness);
         let leading = match mutbl {
             None => "const",
@@ -165,7 +174,8 @@ impl<'a> State<'a> {
                 self.print_use_tree(tree);
                 self.word(";");
             }
-            ast::ItemKind::Static(box StaticItem { ty, mutability: mutbl, expr: body }) => {
+            ast::ItemKind::Static(box StaticItem { ty, safety, mutability: mutbl, expr: body }) => {
+                self.print_safety(*safety);
                 self.print_item_const(
                     item.ident,
                     Some(*mutbl),
@@ -173,6 +183,7 @@ impl<'a> State<'a> {
                     ty,
                     body.as_deref(),
                     &item.vis,
+                    ast::Safety::Default,
                     ast::Defaultness::Final,
                 );
             }
@@ -184,6 +195,7 @@ impl<'a> State<'a> {
                     ty,
                     expr.as_deref(),
                     &item.vis,
+                    ast::Safety::Default,
                     *defaultness,
                 );
             }
@@ -380,7 +392,7 @@ impl<'a> State<'a> {
                 &item.vis,
                 &deleg.qself,
                 &deleg.path,
-                None,
+                DelegationKind::Single,
                 &deleg.body,
             ),
             ast::ItemKind::DelegationMac(deleg) => self.print_delegation(
@@ -388,7 +400,7 @@ impl<'a> State<'a> {
                 &item.vis,
                 &deleg.qself,
                 &deleg.prefix,
-                Some(&deleg.suffixes),
+                deleg.suffixes.as_ref().map_or(DelegationKind::Glob, |s| DelegationKind::List(s)),
                 &deleg.body,
             ),
         }
@@ -541,6 +553,7 @@ impl<'a> State<'a> {
                     ty,
                     expr.as_deref(),
                     vis,
+                    ast::Safety::Default,
                     *defaultness,
                 );
             }
@@ -572,7 +585,7 @@ impl<'a> State<'a> {
                 vis,
                 &deleg.qself,
                 &deleg.path,
-                None,
+                DelegationKind::Single,
                 &deleg.body,
             ),
             ast::AssocItemKind::DelegationMac(deleg) => self.print_delegation(
@@ -580,20 +593,20 @@ impl<'a> State<'a> {
                 vis,
                 &deleg.qself,
                 &deleg.prefix,
-                Some(&deleg.suffixes),
+                deleg.suffixes.as_ref().map_or(DelegationKind::Glob, |s| DelegationKind::List(s)),
                 &deleg.body,
             ),
         }
         self.ann.post(self, AnnNode::SubItem(id))
     }
 
-    pub(crate) fn print_delegation(
+    fn print_delegation(
         &mut self,
         attrs: &[ast::Attribute],
         vis: &ast::Visibility,
         qself: &Option<P<ast::QSelf>>,
         path: &ast::Path,
-        suffixes: Option<&[(Ident, Option<Ident>)]>,
+        kind: DelegationKind<'_>,
         body: &Option<P<ast::Block>>,
     ) {
         if body.is_some() {
@@ -607,21 +620,28 @@ impl<'a> State<'a> {
         } else {
             self.print_path(path, false, 0);
         }
-        if let Some(suffixes) = suffixes {
-            self.word("::");
-            self.word("{");
-            for (i, (ident, rename)) in suffixes.iter().enumerate() {
-                self.print_ident(*ident);
-                if let Some(rename) = rename {
-                    self.nbsp();
-                    self.word_nbsp("as");
-                    self.print_ident(*rename);
+        match kind {
+            DelegationKind::Single => {}
+            DelegationKind::List(suffixes) => {
+                self.word("::");
+                self.word("{");
+                for (i, (ident, rename)) in suffixes.iter().enumerate() {
+                    self.print_ident(*ident);
+                    if let Some(rename) = rename {
+                        self.nbsp();
+                        self.word_nbsp("as");
+                        self.print_ident(*rename);
+                    }
+                    if i != suffixes.len() - 1 {
+                        self.word_space(",");
+                    }
                 }
-                if i != suffixes.len() - 1 {
-                    self.word_space(",");
-                }
+                self.word("}");
             }
-            self.word("}");
+            DelegationKind::Glob => {
+                self.word("::");
+                self.word("*");
+            }
         }
         if let Some(body) = body {
             self.nbsp();
@@ -768,8 +788,8 @@ impl<'a> State<'a> {
                 }
                 if items.is_empty() {
                     self.word("{}");
-                } else if items.len() == 1 {
-                    self.print_use_tree(&items[0].0);
+                } else if let [(item, _)] = items.as_slice() {
+                    self.print_use_tree(item);
                 } else {
                     self.cbox(INDENT_UNIT);
                     self.word("{");

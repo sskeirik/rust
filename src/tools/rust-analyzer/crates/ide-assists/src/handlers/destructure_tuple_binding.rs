@@ -1,3 +1,4 @@
+use ide_db::text_edit::TextRange;
 use ide_db::{
     assists::{AssistId, AssistKind},
     defs::Definition,
@@ -8,7 +9,6 @@ use syntax::{
     ast::{self, make, AstNode, FieldExpr, HasName, IdentPat},
     ted,
 };
-use text_edit::TextRange;
 
 use crate::{
     assist_context::{AssistContext, Assists, SourceChangeBuilder},
@@ -224,7 +224,7 @@ fn edit_tuple_usages(
         // tree mutation in the same file breaks when `builder.edit_file`
         // is called
 
-        if let Some((_, refs)) = usages.iter().find(|(file_id, _)| **file_id == ctx.file_id()) {
+        if let Some((_, refs)) = usages.iter().find(|(file_id, _)| *file_id == ctx.file_id()) {
             current_file_usages = Some(
                 refs.iter()
                     .filter_map(|r| edit_tuple_usage(ctx, edit, r, data, in_sub_pattern))
@@ -233,11 +233,11 @@ fn edit_tuple_usages(
         }
 
         for (file_id, refs) in usages.iter() {
-            if *file_id == ctx.file_id() {
+            if file_id == ctx.file_id() {
                 continue;
             }
 
-            edit.edit_file(*file_id);
+            edit.edit_file(file_id.file_id());
 
             let tuple_edits = refs
                 .iter()

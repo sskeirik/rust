@@ -7,8 +7,6 @@
 //! errors. We still look for those primitives in the MIR const-checker to ensure nothing slips
 //! through, but errors for structured control flow in a `const` should be emitted here.
 
-use rustc_attr as attr;
-use rustc_hir as hir;
 use rustc_hir::def_id::{LocalDefId, LocalModDefId};
 use rustc_hir::intravisit::{self, Visitor};
 use rustc_middle::hir::nested_filter;
@@ -16,7 +14,8 @@ use rustc_middle::query::Providers;
 use rustc_middle::span_bug;
 use rustc_middle::ty::TyCtxt;
 use rustc_session::parse::feature_err;
-use rustc_span::{sym, Span, Symbol};
+use rustc_span::{Span, Symbol, sym};
+use {rustc_attr as attr, rustc_hir as hir};
 
 use crate::errors::SkippingConstChecks;
 
@@ -88,7 +87,7 @@ impl<'tcx> CheckConstVisitor<'tcx> {
         let is_feature_allowed = |feature_gate| {
             // All features require that the corresponding gate be enabled,
             // even if the function has `#[rustc_allow_const_fn_unstable(the_gate)]`.
-            if !tcx.features().active(feature_gate) {
+            if !tcx.features().enabled(feature_gate) {
                 return false;
             }
 
@@ -106,7 +105,7 @@ impl<'tcx> CheckConstVisitor<'tcx> {
 
             // If this crate is not using stability attributes, or this function is not claiming to be a
             // stable `const fn`, that is all that is required.
-            if !tcx.features().staged_api || tcx.has_attr(def_id, sym::rustc_const_unstable) {
+            if !tcx.features().staged_api() || tcx.has_attr(def_id, sym::rustc_const_unstable) {
                 return true;
             }
 
@@ -136,7 +135,7 @@ impl<'tcx> CheckConstVisitor<'tcx> {
 
         let required_gates = required_gates.unwrap_or(&[]);
         let missing_gates: Vec<_> =
-            required_gates.iter().copied().filter(|&g| !features.active(g)).collect();
+            required_gates.iter().copied().filter(|&g| !features.enabled(g)).collect();
 
         match missing_gates.as_slice() {
             [] => {
@@ -196,6 +195,11 @@ impl<'tcx> Visitor<'tcx> for CheckConstVisitor<'tcx> {
         self.recurse_into(kind, None, |this| intravisit::walk_anon_const(this, anon));
     }
 
+    fn visit_inline_const(&mut self, block: &'tcx hir::ConstBlock) {
+        let kind = Some(hir::ConstContext::Const { inline: true });
+        self.recurse_into(kind, None, |this| intravisit::walk_inline_const(this, block));
+    }
+
     fn visit_body(&mut self, body: &hir::Body<'tcx>) {
         let owner = self.tcx.hir().body_owner_def_id(body.id());
         let kind = self.tcx.hir().body_const_context(owner);
@@ -222,11 +226,6 @@ impl<'tcx> Visitor<'tcx> for CheckConstVisitor<'tcx> {
                 if let Some(expr) = non_const_expr {
                     self.const_check_violated(expr, e.span);
                 }
-            }
-            hir::ExprKind::ConstBlock(expr) => {
-                let kind = Some(hir::ConstContext::Const { inline: true });
-                self.recurse_into(kind, None, |this| intravisit::walk_expr(this, expr));
-                return;
             }
 
             _ => {}
