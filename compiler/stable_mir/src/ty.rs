@@ -1,7 +1,7 @@
 use std::fmt::{self, Debug, Display, Formatter};
 use std::ops::Range;
 
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use super::mir::{Body, Mutability, Safety};
 use super::{DefId, Error, Symbol, with};
@@ -12,9 +12,6 @@ use crate::mir::alloc::{AllocId, read_target_int, read_target_uint};
 use crate::mir::mono::StaticDef;
 use crate::target::MachineInfo;
 use crate::{Filename, Opaque};
-use serde::{Serialize, Serializer};
-use std::fmt::{self, Debug, Display, Formatter};
-use std::ops::Range;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash, PartialOrd, Ord)]
 pub struct Ty(usize);
